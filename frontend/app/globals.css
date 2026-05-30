@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: "Inter", system-ui;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+}
+
+body {
+  background:
+    radial-gradient(circle at 62% 0%, rgba(111, 97, 255, 0.08), transparent 32%),
+    linear-gradient(180deg, #f8faff 0%, #f3f6fb 48%, #eef3f9 100%);
+  color: #111827;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.brand-gradient {
+  background-image: linear-gradient(135deg, #3677ff 0%, #6e4cff 54%, #8c5cf6 100%);
+}
+
+.brand-gradient-soft {
+  background-image: linear-gradient(135deg, #eef4ff 0%, #f4f0ff 100%);
+}
+
+.dashboard-card {
+  border: 1px solid rgba(216, 224, 239, 0.86);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 18px 42px rgba(30, 58, 138, 0.06),
+    0 2px 8px rgba(16, 24, 40, 0.03);
+  backdrop-filter: blur(12px);
+}
+
+.soft-divider {
+  background: linear-gradient(180deg, transparent, #e7edf8 20%, #e7edf8 80%, transparent);
+}
+
+.isometric-blocks {
+  position: relative;
+  height: 104px;
+  width: 132px;
+}
+
+.isometric-blocks span {
+  position: absolute;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #6d5dfc, #9a78ff);
+  box-shadow: 0 14px 24px rgba(97, 80, 255, 0.24);
+}
