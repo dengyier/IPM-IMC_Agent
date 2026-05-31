@@ -15,7 +15,13 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.db.models import AgentRun, ExpansionChunk, ExpansionSource
+from app.db.models import (
+    AgentRun,
+    ExpansionChunk,
+    ExpansionItem,
+    ExpansionSource,
+    ReviewTask,
+)
 from app.schemas.expansion import AbsorbExpansionResult, EvolveNodeResult
 from app.services.embeddings import EmbeddingProvider
 from app.services.expansion_absorption_service import ExpansionAbsorptionService
@@ -47,10 +53,55 @@ class ExternalInfoEvolutionGraph:
     # absorb flow
     # ------------------------------------------------------------------ #
 
+    def _purge_prior_absorption(self, source_id: str) -> dict[str, int]:
+        """清除某来源上一轮吸收产物（审核任务→条目→切块），保证重复吸收是替换语义。
+
+        注意：只清理「未进入正式版本」的产物。已审核通过并演进的扩展条目通过
+        knowledge_node_versions.incorporated_item_ids 留痕，删除条目不影响已生成的版本。
+        """
+        item_ids = [
+            row[0]
+            for row in self.db.query(ExpansionItem.id)
+            .filter(ExpansionItem.source_id == source_id)
+            .all()
+        ]
+        review_deleted = 0
+        if item_ids:
+            review_deleted = (
+                self.db.query(ReviewTask)
+                .filter(ReviewTask.item_id.in_(item_ids))
+                .delete(synchronize_session=False)
+            )
+        items_deleted = (
+            self.db.query(ExpansionItem)
+            .filter(ExpansionItem.source_id == source_id)
+            .delete(synchronize_session=False)
+        )
+        chunks_deleted = (
+            self.db.query(ExpansionChunk)
+            .filter(ExpansionChunk.source_id == source_id)
+            .delete(synchronize_session=False)
+        )
+        if review_deleted or items_deleted or chunks_deleted:
+            self.db.flush()
+        return {
+            "review_tasks": review_deleted,
+            "items": items_deleted,
+            "chunks": chunks_deleted,
+        }
+
     def run_absorb(self, source: ExpansionSource) -> AbsorbExpansionResult:
         trace: list[str] = []
         run = self._start_run("expansion_absorb", {"source_id": source.id})
         try:
+            # 幂等：重复吸收同一来源应「替换」而非「追加」，先清除上一轮产物
+            purged = self._purge_prior_absorption(source.id)
+            if purged:
+                trace.append(
+                    f"检测到既有吸收产物，已清除以重新吸收："
+                    f"{purged['review_tasks']} 审核任务 / {purged['items']} 条目 / {purged['chunks']} 切块"
+                )
+
             records = self.absorb_svc.parse_and_chunk(source)
             trace.append(f"解析并切块：{len(records)} 块")
 

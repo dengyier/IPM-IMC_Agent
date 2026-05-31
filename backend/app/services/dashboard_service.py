@@ -18,6 +18,7 @@ from app.db.models import (
 )
 from app.schemas.dashboard import (
     DashboardSummary,
+    PendingItem,
     RecentReport,
     RecentReviewTask,
     SystemStatus,
@@ -65,6 +66,43 @@ class DashboardService:
             reports=self._count(DiagnosisReport),
             system_status=status,
         )
+
+    def pending_items(self) -> list[PendingItem]:
+        """跨域待办计数（始终返回固定 3 桶，便于前端稳定渲染）。
+
+        - review : 待审核扩展条目（review_tasks.status == pending）
+        - sources: 资料待处理（核心资料未建底座 uploaded/processed + 外部资料未吸收 uploaded）
+        - reports: 报告待复核（diagnosis_reports.status != checked）
+        """
+        review_pending = (
+            self.db.query(func.count(ReviewTask.id))
+            .filter(ReviewTask.status == "pending")
+            .scalar()
+            or 0
+        )
+        core_pending = (
+            self.db.query(func.count(MethodologySource.id))
+            .filter(MethodologySource.status.in_(["uploaded", "processed"]))
+            .scalar()
+            or 0
+        )
+        expansion_pending = (
+            self.db.query(func.count(ExpansionSource.id))
+            .filter(ExpansionSource.status == "uploaded")
+            .scalar()
+            or 0
+        )
+        reports_pending = (
+            self.db.query(func.count(DiagnosisReport.id))
+            .filter(DiagnosisReport.status != "checked")
+            .scalar()
+            or 0
+        )
+        return [
+            PendingItem(key="review", count=review_pending),
+            PendingItem(key="sources", count=core_pending + expansion_pending),
+            PendingItem(key="reports", count=reports_pending),
+        ]
 
     def recent_reports(self, limit: int = 8) -> list[RecentReport]:
         rows = (

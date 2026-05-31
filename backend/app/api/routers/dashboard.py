@@ -10,6 +10,7 @@ from app.core.config import Settings
 from app.db.session import get_db
 from app.schemas.dashboard import (
     DashboardSummary,
+    PendingItem,
     RecentReport,
     RecentReviewTask,
 )
@@ -32,6 +33,11 @@ def summary(
         llm=llm,
         embedding_provider=settings.embedding_provider,
     )
+
+
+@router.get("/pending-items", response_model=list[PendingItem])
+def pending_items(db: Session = Depends(get_db)) -> list[PendingItem]:
+    return DashboardService(db).pending_items()
 
 
 @router.get("/recent-reports", response_model=list[RecentReport])

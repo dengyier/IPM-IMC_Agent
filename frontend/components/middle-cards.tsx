@@ -1,68 +1,27 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
 import { Icon } from "./icon";
 import { Card, CardHeader } from "./card";
 import { cn } from "@/lib/utils";
-import { pendingItems, recentReports, quickActions } from "@/lib/data";
+import { quickActions } from "@/lib/data";
+import { ApiError, PendingItem, RecentReport, dashboardApi } from "@/lib/api";
+import { pendingItemMeta, reportGrade } from "@/lib/presentation";
 
-const gradeStyle: Record<string, string> = {
-  优秀: "bg-emerald-50 text-emerald-600",
-  良好: "bg-blue-50 text-blue-600",
-  中等: "bg-orange-50 text-orange-500",
-};
+function fmtTime(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 export function MiddleCards() {
   return (
     <div className="grid grid-cols-3 gap-5">
-      {/* 待处理事项 */}
-      <Card>
-        <CardHeader title="待处理事项" />
-        <div className="px-5 pb-4 pt-2">
-          {pendingItems.map((item) => (
-            <div
-              key={item.label}
-              className="flex items-center gap-3 border-b border-line/70 py-3.5 last:border-0"
-            >
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#f3f5ff]">
-                <Icon name={item.icon} className="h-4 w-4 text-brand" />
-              </div>
-              <span className="text-[13px] text-gray-600">{item.label}</span>
-              <div className="ml-auto flex items-center gap-2">
-                <span className="text-[13px] font-bold text-ink">{item.count}</span>
-                <span className="text-[12px] text-gray-400">{item.unit}</span>
-                <span className={cn("h-2 w-2 rounded-full", item.dot)} />
-              </div>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      {/* 最近诊断报告 */}
-      <Card>
-        <CardHeader title="最近诊断报告" action="查看全部" />
-        <div className="px-5 pb-4 pt-2">
-          {recentReports.map((r) => (
-            <div
-              key={r.title}
-              className="flex items-center gap-3 border-b border-line/70 py-2.5 last:border-0"
-            >
-              <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-emerald-50">
-                <Icon name="file-text" className="h-3.5 w-3.5 text-emerald-500" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[13px] text-gray-700">{r.title}</div>
-                <div className="mt-0.5 text-[11px] text-gray-400">{r.time}</div>
-              </div>
-              <span
-                className={cn(
-                  "shrink-0 rounded-md px-2 py-0.5 text-[11px] font-medium",
-                  gradeStyle[r.grade]
-                )}
-              >
-                {r.grade}
-              </span>
-            </div>
-          ))}
-        </div>
-      </Card>
+      <PendingItemsCard />
+      <RecentReportsCard />
 
       {/* 常用功能 */}
       <Card>
@@ -82,5 +41,115 @@ export function MiddleCards() {
         </div>
       </Card>
     </div>
+  );
+}
+
+function RecentReportsCard() {
+  const [reports, setReports] = useState<RecentReport[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    dashboardApi
+      .recentReports(6)
+      .then((d) => !cancelled && setReports(d))
+      .catch((e) => !cancelled && setError(e instanceof ApiError ? e.message : "加载失败"))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <Card>
+      <CardHeader title="最近诊断报告" action="查看全部" />
+      <div className="px-5 pb-4 pt-2">
+        {loading && <p className="py-6 text-center text-[12px] text-gray-400">加载中…</p>}
+        {error && !loading && <p className="py-6 text-center text-[12px] text-rose-500">{error}</p>}
+        {!loading && !error && reports.length === 0 && (
+          <p className="py-6 text-center text-[12px] text-gray-400">暂无诊断报告</p>
+        )}
+        {!loading &&
+          !error &&
+          reports.map((r) => {
+            const grade = reportGrade(r.quality_score);
+            return (
+              <a
+                key={r.id}
+                href="/reports"
+                className="flex items-center gap-3 border-b border-line/70 py-2.5 transition-colors last:border-0 hover:bg-gray-50/60"
+              >
+                <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-emerald-50">
+                  <Icon name="file-text" className="h-3.5 w-3.5 text-emerald-500" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13px] text-gray-700">{r.title}</div>
+                  <div className="mt-0.5 text-[11px] text-gray-400">{fmtTime(r.created_at)}</div>
+                </div>
+                <span className={cn("shrink-0 rounded-md px-2 py-0.5 text-[11px] font-medium", grade.tone)}>
+                  {grade.label}
+                </span>
+              </a>
+            );
+          })}
+      </div>
+    </Card>
+  );
+}
+
+function PendingItemsCard() {
+  const [items, setItems] = useState<PendingItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    dashboardApi
+      .pendingItems()
+      .then((d) => !cancelled && setItems(d))
+      .catch((e) => !cancelled && setError(e instanceof ApiError ? e.message : "加载失败"))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <Card>
+      <CardHeader title="待处理事项" />
+      <div className="px-5 pb-4 pt-2">
+        {loading && <p className="py-6 text-center text-[12px] text-gray-400">加载中…</p>}
+        {error && !loading && <p className="py-6 text-center text-[12px] text-rose-500">{error}</p>}
+        {!loading &&
+          !error &&
+          items.map((item) => {
+            const meta = pendingItemMeta[item.key];
+            if (!meta) return null;
+            return (
+              <a
+                key={item.key}
+                href={meta.route}
+                className="flex items-center gap-3 border-b border-line/70 py-3.5 transition-colors last:border-0 hover:bg-gray-50/60"
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#f3f5ff]">
+                  <Icon name={meta.icon} className="h-4 w-4 text-brand" />
+                </div>
+                <span className="text-[13px] text-gray-600">{meta.label}</span>
+                <div className="ml-auto flex items-center gap-2">
+                  <span className="text-[13px] font-bold text-ink">{item.count}</span>
+                  <span className="text-[12px] text-gray-400">条</span>
+                  <span
+                    className={cn(
+                      "h-2 w-2 rounded-full",
+                      item.count > 0 ? meta.dot : "bg-gray-200"
+                    )}
+                  />
+                </div>
+              </a>
+            );
+          })}
+      </div>
+    </Card>
   );
 }

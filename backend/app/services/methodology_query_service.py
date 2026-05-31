@@ -15,6 +15,9 @@ from app.db.models import (
     MethodologyNode,
 )
 from app.schemas.methodology import (
+    GraphEdge,
+    GraphNode,
+    MethodologyGraphOut,
     NodeCardOut,
     NodeCategoryCount,
     NodeEdgeOut,
@@ -113,6 +116,69 @@ class MethodologyQueryService:
         return out
 
     # --------------------------- 子资源 ---------------------------- #
+
+    def graph(self, limit: int = 40) -> MethodologyGraphOut:
+        """取连接度最高的 top-N 节点及其内部边，作为首页图谱预览子图。"""
+        total_nodes = self.db.query(func.count(MethodologyNode.id)).scalar() or 0
+        total_edges = self.db.query(func.count(MethodologyEdge.id)).scalar() or 0
+
+        # 全库各节点连接度（source + target）
+        degree: dict[str, int] = {}
+        for nid, c in (
+            self.db.query(MethodologyEdge.source_node_id, func.count(MethodologyEdge.id))
+            .group_by(MethodologyEdge.source_node_id)
+            .all()
+        ):
+            degree[nid] = degree.get(nid, 0) + c
+        for nid, c in (
+            self.db.query(MethodologyEdge.target_node_id, func.count(MethodologyEdge.id))
+            .group_by(MethodologyEdge.target_node_id)
+            .all()
+        ):
+            degree[nid] = degree.get(nid, 0) + c
+
+        top_ids = [nid for nid, _ in sorted(degree.items(), key=lambda x: -x[1])[:limit]]
+        if not top_ids:
+            return MethodologyGraphOut(
+                nodes=[], edges=[], total_nodes=total_nodes, total_edges=total_edges
+            )
+
+        node_rows = (
+            self.db.query(MethodologyNode)
+            .filter(MethodologyNode.id.in_(top_ids))
+            .all()
+        )
+        nodes = [
+            GraphNode(
+                id=n.id,
+                node_name=n.node_name,
+                node_category=n.node_category,
+                degree=degree.get(n.id, 0),
+            )
+            for n in node_rows
+        ]
+
+        top_set = set(top_ids)
+        edge_rows = (
+            self.db.query(MethodologyEdge)
+            .filter(
+                MethodologyEdge.source_node_id.in_(top_ids),
+                MethodologyEdge.target_node_id.in_(top_ids),
+            )
+            .all()
+        )
+        edges = [
+            GraphEdge(
+                source=e.source_node_id,
+                target=e.target_node_id,
+                relation_type=e.relation_type,
+            )
+            for e in edge_rows
+            if e.source_node_id in top_set and e.target_node_id in top_set
+        ]
+        return MethodologyGraphOut(
+            nodes=nodes, edges=edges, total_nodes=total_nodes, total_edges=total_edges
+        )
 
     def node_edges(self, node_id: str) -> list[NodeEdgeOut]:
         edges = (

@@ -16,6 +16,7 @@ export const sourceStatusTone: Record<string, { label: string; tone: string }> =
   processing: { label: "处理中", tone: "bg-orange-50 text-orange-500" },
   processed: { label: "已入库", tone: "bg-blue-50 text-blue-600" },
   kernel_built: { label: "已建底座", tone: "bg-emerald-50 text-emerald-600" },
+  absorbed: { label: "已吸收", tone: "bg-emerald-50 text-emerald-600" },
   failed: { label: "处理失败", tone: "bg-rose-50 text-rose-500" },
 };
 
@@ -133,6 +134,24 @@ export function scoreBand(score: number): { label: string; tone: string } {
   if (score >= 60) return { label: "中等", tone: "bg-orange-50 text-orange-500" };
   return { label: "待完善", tone: "bg-rose-50 text-rose-500" };
 }
+
+// 诊断报告质量分（0~1）→ 评级标签 + 徽标样式（工作台「最近诊断报告」用）
+export function reportGrade(score: number): { label: string; tone: string } {
+  const s = score ?? 0;
+  if (s >= 0.85) return { label: "优秀", tone: "bg-emerald-50 text-emerald-600" };
+  if (s >= 0.7) return { label: "良好", tone: "bg-blue-50 text-blue-600" };
+  return { label: "中等", tone: "bg-orange-50 text-orange-500" };
+}
+
+// 工作台「待处理事项」桶 → 文案 / 图标 / 圆点色 / 跳转路由（后端只给 key+count）
+export const pendingItemMeta: Record<
+  string,
+  { label: string; icon: string; dot: string; route: string }
+> = {
+  review: { label: "待审核条目", icon: "clipboard-check", dot: "bg-rose-500", route: "/review" },
+  sources: { label: "资料待处理", icon: "folder-plus", dot: "bg-orange-400", route: "/data-center" },
+  reports: { label: "报告待复核", icon: "file-text", dot: "bg-violet-500", route: "/reports" },
+};
 
 // 千分位
 export const fmtNum = (n: number) => n.toLocaleString("en-US");

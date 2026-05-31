@@ -186,8 +186,15 @@ export interface RecentReviewTask {
   created_at: string | null;
 }
 
+// 待处理事项桶（后端只给 key+count，前端映射文案/图标/颜色/跳转）
+export interface PendingItem {
+  key: string; // review | sources | reports
+  count: number;
+}
+
 export const dashboardApi = {
   summary: () => api.get<DashboardSummary>("/api/dashboard/summary"),
+  pendingItems: () => api.get<PendingItem[]>("/api/dashboard/pending-items"),
   recentReports: (limit = 8) =>
     api.get<RecentReport[]>(`/api/dashboard/recent-reports?limit=${limit}`),
   recentReviewTasks: (limit = 8) =>

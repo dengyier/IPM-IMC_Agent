@@ -12,7 +12,7 @@ import {
   methodologyApi,
   pollTask,
 } from "@/lib/api";
-import { sourceStatusTone, sourceTypeLabel } from "@/lib/presentation";
+import { sourceStatusTone } from "@/lib/presentation";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 10;
@@ -112,7 +112,7 @@ export function DataCenterPage() {
   const stats = useMemo(() => {
     const s = { total: rows.length, done: 0, processing: 0, uploaded: 0, failed: 0 };
     for (const r of rows) {
-      if (r.status === "processed" || r.status === "kernel_built") s.done++;
+      if (r.status === "processed" || r.status === "kernel_built" || r.status === "absorbed") s.done++;
       else if (r.status === "processing") s.processing++;
       else if (r.status === "uploaded") s.uploaded++;
       else if (r.status === "failed") s.failed++;
@@ -489,11 +489,16 @@ function MaterialTableRow({
 }) {
   const st = sourceStatusTone[row.status] ?? { label: row.status, tone: "bg-slate-100 text-slate-500" };
 
-  // 行动作文案：核心资料 uploaded→解析 / processed→建底座 / kernel_built→已完成；外部资料→吸收
+  // 行动作文案：核心资料 uploaded→解析 / processed→建底座 / kernel_built→已完成；外部资料 →吸收 / absorbed→已完成
   let actionLabel = "";
   let actionDisabled = false;
   if (row.layer === "expansion") {
-    actionLabel = "吸收";
+    if (row.status === "absorbed") {
+      actionLabel = "已完成";
+      actionDisabled = true;
+    } else {
+      actionLabel = "吸收";
+    }
   } else if (row.status === "uploaded") {
     actionLabel = "解析";
   } else if (row.status === "processed") {
@@ -521,8 +526,13 @@ function MaterialTableRow({
           <div className="mt-0.5 text-[11px] text-slate-400">{fmtSize(row.size)}</div>
         </div>
       </div>
-      <span className="w-fit rounded-full bg-slate-50 px-2.5 py-1 text-[12px] font-semibold text-slate-600">
-        {sourceTypeLabel(row.sourceType)}
+      <span
+        className={cn(
+          "w-fit rounded-full px-2.5 py-1 text-[12px] font-semibold",
+          row.layer === "core" ? "bg-[#f0edff] text-brand" : "bg-orange-50 text-orange-500"
+        )}
+      >
+        {row.layer === "core" ? "核心方法" : "外部资料"}
       </span>
       <span className="text-slate-600">{row.uploader}</span>
       <span className="text-slate-600">{fmtTime(row.createdAt)}</span>

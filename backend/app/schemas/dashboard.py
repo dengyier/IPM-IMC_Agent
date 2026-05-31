@@ -26,6 +26,13 @@ class DashboardSummary(BaseModel):
     system_status: SystemStatus = Field(default_factory=SystemStatus)
 
 
+class PendingItem(BaseModel):
+    """待处理事项桶（跨域待办计数）。后端只给 key+count，前端映射文案/图标/颜色/跳转。"""
+
+    key: str  # review | sources | reports
+    count: int = 0
+
+
 class RecentReport(BaseModel):
     id: str
     title: str

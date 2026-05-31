@@ -138,6 +138,33 @@ class NodeCategoryCount(BaseModel):
     count: int
 
 
+# --------------------------------------------------------------------------- #
+# 知识网络图谱（工作台首页预览：按连接度取 top-N 子图）
+# --------------------------------------------------------------------------- #
+
+
+class GraphNode(BaseModel):
+    id: str
+    node_name: str
+    node_category: str | None = None
+    degree: int = 0  # 连接度（边数），前端用于节点大小
+
+
+class GraphEdge(BaseModel):
+    source: str
+    target: str
+    relation_type: str
+
+
+class MethodologyGraphOut(BaseModel):
+    """子图：top-N 高连接度节点 + 它们之间的边。布局/配色由前端负责。"""
+
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+    total_nodes: int = 0  # 全库节点总数（供「查看完整图谱」上下文）
+    total_edges: int = 0
+
+
 class NodeEdgeOut(BaseModel):
     """以某节点为中心的关系边（含邻居名称与方向）。"""
 
