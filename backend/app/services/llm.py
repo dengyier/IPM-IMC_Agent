@@ -30,6 +30,36 @@ class LLMService:
     def available(self) -> bool:
         return self._client is not None
 
+    def ping(self) -> dict:
+        """实时探测 LLM 连通性（真实往返一次最小请求）。
+
+        与 chat_* 不同：这里**不吞异常**，把错误明细返回给调用方用于「测试连接」。
+        """
+        import time
+
+        if not self.settings.deepseek_api_key:
+            return {"ok": False, "model": self.model, "latency_ms": None,
+                    "detail": "未配置 DEEPSEEK_API_KEY"}
+        if not self._client:
+            return {"ok": False, "model": self.model, "latency_ms": None,
+                    "detail": "LLM 客户端初始化失败（openai 依赖或 base_url 异常）"}
+        started = time.perf_counter()
+        try:
+            resp = self._client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": "ping"}],
+                max_tokens=1,
+                temperature=0,
+            )
+            latency = int((time.perf_counter() - started) * 1000)
+            ok = bool(resp.choices)
+            return {"ok": ok, "model": self.model, "latency_ms": latency,
+                    "detail": "连接正常" if ok else "无返回内容"}
+        except Exception as exc:  # noqa: BLE001 故意上抛明细给前端
+            latency = int((time.perf_counter() - started) * 1000)
+            return {"ok": False, "model": self.model, "latency_ms": latency,
+                    "detail": f"{type(exc).__name__}: {exc}"}
+
     def chat_json(
         self, system_prompt: str, user_prompt: str, temperature: float = 0.2
     ) -> dict | None:

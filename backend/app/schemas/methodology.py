@@ -107,6 +107,76 @@ class MethodologyEdgeOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# --------------------------------------------------------------------------- #
+# 知识节点库视图（卡片 / 分类 / 子资源）
+# --------------------------------------------------------------------------- #
+
+
+class NodeCardOut(BaseModel):
+    """节点列表卡片：语义字段 + 计数；样式与展示串由前端拼。"""
+
+    id: str
+    node_name: str
+    node_category: str | None = None
+    definition: str = ""  # 已截断的摘要
+    status: str
+    version: str
+    edge_count: int = 0
+    expansion_count: int = 0
+    source_chunk_count: int = 0
+
+
+class PaginatedNodes(BaseModel):
+    items: list[NodeCardOut]
+    total: int
+    page: int = 1
+    page_size: int = 20
+
+
+class NodeCategoryCount(BaseModel):
+    label: str
+    count: int
+
+
+class NodeEdgeOut(BaseModel):
+    """以某节点为中心的关系边（含邻居名称与方向）。"""
+
+    id: str
+    relation_type: str
+    relation_description: str | None = None
+    weight: float
+    direction: Literal["outgoing", "incoming"]
+    neighbor_id: str
+    neighbor_name: str
+
+
+class NodeVersionOut(BaseModel):
+    id: str
+    version: str
+    change_type: str
+    change_summary: str = ""
+    supplementary_context: str = ""
+    incorporated_item_ids: list[str] = Field(default_factory=list)
+    status: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class NodeExpansionOut(BaseModel):
+    """对齐到该节点的外部扩展条目（外部内容，非核心原文）。"""
+
+    id: str
+    extension_type: str
+    title: str = ""
+    summary: str = ""
+    alignment_score: float = 0.0
+    review_status: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class ProblemRoutingRuleOut(BaseModel):
     id: str
     intent: str

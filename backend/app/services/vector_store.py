@@ -43,6 +43,42 @@ class VectorStore:
     def backend(self) -> str:
         return "qdrant" if self.client else "memory"
 
+    def stats(self) -> dict:
+        """向量库连通性 + 规模信息，用于「测试向量库」。
+
+        memory 回退视为可用但降级（offline_fallback）；qdrant 真实 count。
+        """
+        if not self.client:
+            return {
+                "ok": True,
+                "backend": "memory",
+                "collection": self.collection,
+                "vector_size": self.vector_size,
+                "point_count": len(self._memory),
+                "detail": "未连接 Qdrant，使用内存回退（重启即丢）",
+            }
+        try:
+            count = self.client.count(
+                collection_name=self.collection, exact=True
+            ).count
+            return {
+                "ok": True,
+                "backend": "qdrant",
+                "collection": self.collection,
+                "vector_size": self.vector_size,
+                "point_count": int(count),
+                "detail": "连接正常",
+            }
+        except Exception as exc:  # noqa: BLE001 明细回传前端
+            return {
+                "ok": False,
+                "backend": "qdrant",
+                "collection": self.collection,
+                "vector_size": self.vector_size,
+                "point_count": None,
+                "detail": f"{type(exc).__name__}: {exc}",
+            }
+
     def upsert(self, points: list[tuple[str, list[float], dict[str, Any]]]) -> None:
         if self.client:
             from qdrant_client.http.models import PointStruct

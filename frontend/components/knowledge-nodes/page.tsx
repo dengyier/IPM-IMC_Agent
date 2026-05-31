@@ -1,14 +1,20 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { Card } from "@/components/card";
 import { Icon } from "@/components/icon";
 import { cn } from "@/lib/utils";
+import { knowledgeAssistantPrompts, knowledgeHistory } from "@/lib/data";
 import {
-  knowledgeAssistantPrompts,
-  knowledgeCategories,
-  knowledgeHistory,
-  knowledgeNodes,
-} from "@/lib/data";
+  nodesApi,
+  type NodeCard as NodeCardData,
+  type NodeCategory,
+} from "@/lib/api";
+import { fmtNum, nodeStatusTone } from "@/lib/presentation";
 
 const filters = ["节点状态：全部", "来源类型：全部", "适用场景：全部", "版本：全部"];
+
+const PAGE_SIZE = 20;
 
 const graphLinks = [
   ["客户细分", "影响", "渠道通路"],
@@ -22,14 +28,86 @@ const graphLinks = [
 ];
 
 export function KnowledgeNodesPage() {
+  const [category, setCategory] = useState("全部节点");
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [page, setPage] = useState(1);
+
+  const [nodes, setNodes] = useState<NodeCardData[]>([]);
+  const [total, setTotal] = useState(0);
+  const [categories, setCategories] = useState<NodeCategory[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // 搜索框防抖
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query.trim()), 350);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  // 切换分类 / 搜索时回到第一页
+  useEffect(() => {
+    setPage(1);
+  }, [category, debouncedQuery]);
+
+  // 分类 Tab 只需加载一次
+  useEffect(() => {
+    nodesApi
+      .categories()
+      .then(setCategories)
+      .catch(() => setCategories([]));
+  }, []);
+
+  // 节点列表
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    nodesApi
+      .list({
+        category: category === "全部节点" ? undefined : category,
+        q: debouncedQuery || undefined,
+        page,
+        pageSize: PAGE_SIZE,
+      })
+      .then((res) => {
+        if (cancelled) return;
+        setNodes(res.items);
+        setTotal(res.total);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e.message || "加载失败");
+        setNodes([]);
+        setTotal(0);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [category, debouncedQuery, page]);
+
   return (
     <main className="flex min-w-0 flex-1 overflow-hidden">
       <section className="flex min-w-0 flex-1 flex-col overflow-y-auto px-8 py-6">
-        <KnowledgeHeader />
-        <KnowledgeSearch />
-        <CategoryTabs />
+        <KnowledgeHeader total={total} />
+        <KnowledgeSearch query={query} onQueryChange={setQuery} />
+        <CategoryTabs
+          categories={categories}
+          selected={category}
+          onSelect={setCategory}
+        />
         <FilterRow />
-        <NodeGrid />
+        <NodeGrid
+          nodes={nodes}
+          total={total}
+          page={page}
+          loading={loading}
+          error={error}
+          onPageChange={setPage}
+        />
         <KnowledgeGraphMini />
       </section>
       <KnowledgeAssistant />
@@ -37,14 +115,14 @@ export function KnowledgeNodesPage() {
   );
 }
 
-function KnowledgeHeader() {
+function KnowledgeHeader({ total }: { total: number }) {
   return (
     <header className="flex items-start justify-between gap-6">
       <div>
         <div className="flex items-center gap-3">
           <h1 className="text-[26px] font-black tracking-[-0.03em] text-ink">知识节点库</h1>
           <span className="rounded-full bg-[#f0edff] px-3 py-1 text-[12px] font-bold text-brand">
-            共 368 个节点
+            共 {fmtNum(total)} 个节点
           </span>
         </div>
         <p className="mt-1.5 text-[13px] font-medium text-slate-500">
@@ -82,12 +160,20 @@ function TopActions() {
   );
 }
 
-function KnowledgeSearch() {
+function KnowledgeSearch({
+  query,
+  onQueryChange,
+}: {
+  query: string;
+  onQueryChange: (v: string) => void;
+}) {
   return (
     <div className="mt-7 flex gap-4">
       <div className="dashboard-card flex h-[58px] min-w-0 flex-1 items-center gap-3 rounded-2xl px-5">
         <Icon name="search" className="h-5 w-5 text-[#65719a]" />
         <input
+          value={query}
+          onChange={(e) => onQueryChange(e.target.value)}
           className="min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-[#8c96b8]"
           placeholder="搜索知识节点，例如：价值主张、客户细分、最小可行验证..."
         />
@@ -104,24 +190,36 @@ function KnowledgeSearch() {
   );
 }
 
-function CategoryTabs() {
+function CategoryTabs({
+  categories,
+  selected,
+  onSelect,
+}: {
+  categories: NodeCategory[];
+  selected: string;
+  onSelect: (label: string) => void;
+}) {
   return (
     <Card className="mt-5 overflow-hidden">
-      <div className="flex items-center gap-7 border-b border-line px-5 py-4">
-        {knowledgeCategories.map((item, index) => (
-          <button
-            key={item.label}
-            className={cn(
-              "flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-bold",
-              index === 0 ? "bg-[#f0edff] text-brand" : "text-[#172452] hover:bg-slate-50"
-            )}
-          >
-            {item.label}
-            <span className={cn("rounded-full px-2 py-0.5 text-[11px]", index === 0 ? "bg-white/70" : "bg-slate-100 text-slate-500")}>
-              {item.count}
-            </span>
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center gap-4 border-b border-line px-5 py-4">
+        {categories.map((item) => {
+          const active = item.label === selected;
+          return (
+            <button
+              key={item.label}
+              onClick={() => onSelect(item.label)}
+              className={cn(
+                "flex items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-bold",
+                active ? "bg-[#f0edff] text-brand" : "text-[#172452] hover:bg-slate-50"
+              )}
+            >
+              {item.label}
+              <span className={cn("rounded-full px-2 py-0.5 text-[11px]", active ? "bg-white/70" : "bg-slate-100 text-slate-500")}>
+                {item.count}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </Card>
   );
@@ -156,109 +254,176 @@ function FilterRow() {
   );
 }
 
-function NodeGrid() {
+function NodeGrid({
+  nodes,
+  total,
+  page,
+  loading,
+  error,
+  onPageChange,
+}: {
+  nodes: NodeCardData[];
+  total: number;
+  page: number;
+  loading: boolean;
+  error: string | null;
+  onPageChange: (p: number) => void;
+}) {
   return (
     <div className="mt-5">
-      <div className="grid gap-4 xl:grid-cols-3">
-        {knowledgeNodes.map((node) => (
-          <NodeCard key={node.title} node={node} />
-        ))}
-        <button className="min-h-[88px] rounded-2xl border border-dashed border-[#d8dcf7] bg-[#f6f7ff] text-center text-brand transition-colors hover:border-brand hover:bg-white">
-          <div className="flex items-center justify-center gap-2 text-[15px] font-bold">
-            <Icon name="plus" className="h-5 w-5" />
-            新建知识节点
-          </div>
-          <p className="mt-1 text-[12px] text-slate-500">沉淀新的知识资产</p>
-        </button>
-      </div>
-      <Pagination />
+      {error ? (
+        <Card className="px-6 py-10 text-center text-[13px] text-rose-500">
+          加载失败：{error}
+        </Card>
+      ) : loading && nodes.length === 0 ? (
+        <Card className="px-6 py-10 text-center text-[13px] text-slate-400">
+          正在加载知识节点…
+        </Card>
+      ) : nodes.length === 0 ? (
+        <Card className="px-6 py-10 text-center text-[13px] text-slate-400">
+          未找到匹配的知识节点
+        </Card>
+      ) : (
+        <div className={cn("grid gap-4 xl:grid-cols-3", loading && "opacity-60")}>
+          {nodes.map((node) => (
+            <NodeCard key={node.id} node={node} />
+          ))}
+          <button className="min-h-[88px] rounded-2xl border border-dashed border-[#d8dcf7] bg-[#f6f7ff] text-center text-brand transition-colors hover:border-brand hover:bg-white">
+            <div className="flex items-center justify-center gap-2 text-[15px] font-bold">
+              <Icon name="plus" className="h-5 w-5" />
+              新建知识节点
+            </div>
+            <p className="mt-1 text-[12px] text-slate-500">沉淀新的知识资产</p>
+          </button>
+        </div>
+      )}
+      <Pagination total={total} page={page} onPageChange={onPageChange} />
     </div>
   );
 }
 
-function NodeCard({ node }: { node: (typeof knowledgeNodes)[number] }) {
+function NodeCard({ node }: { node: NodeCardData }) {
+  const tone = nodeStatusTone[node.status] ?? {
+    label: node.status,
+    tone: "bg-slate-100 text-slate-500",
+  };
   return (
-    <article
-      className={cn(
-        "dashboard-card min-h-[178px] rounded-2xl p-5 transition-transform hover:-translate-y-0.5",
-        node.accent && "border-brand/30 shadow-float"
-      )}
-    >
+    <article className="dashboard-card min-h-[178px] rounded-2xl p-5 transition-transform hover:-translate-y-0.5">
       <div className="flex items-start justify-between gap-3">
-        <h2 className={cn("text-[17px] font-black tracking-[-0.02em]", node.accent ? "text-brand" : "text-[#172452]")}>
-          {node.title}
+        <h2 className="text-[17px] font-black tracking-[-0.02em] text-[#172452]">
+          {node.node_name}
         </h2>
-        <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold", node.statusTone)}>
-          <Icon name={node.status === "已发布" ? "check-circle" : "clock"} className="h-3.5 w-3.5" />
-          {node.status}
+        <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold", tone.tone)}>
+          <Icon name={node.status === "active" ? "check-circle" : "history"} className="h-3.5 w-3.5" />
+          {tone.label}
         </span>
       </div>
-      <p className="mt-4 min-h-[44px] text-[13px] leading-6 text-[#405070]">{node.desc}</p>
+      <p className="mt-4 min-h-[44px] text-[13px] leading-6 text-[#405070]">
+        {node.definition || "（暂无定义）"}
+      </p>
       <div className="mt-4 flex items-center gap-5 text-[12px] text-slate-500">
         <span className="inline-flex items-center gap-1.5">
           <Icon name="file-text" className="h-3.5 w-3.5" />
           {node.version}
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <Icon name="link" className="h-3.5 w-3.5" />
-          关联 {node.related} 个节点
+          <Icon name="git-merge" className="h-3.5 w-3.5" />
+          关联 {node.edge_count} 个节点
         </span>
       </div>
       <div className="mt-5 flex items-center border-t border-line pt-3 text-[12px] text-slate-500">
-        <span className="truncate">来源：{node.source}</span>
-        <span className="ml-auto flex items-center gap-1">
-          <MiniPeople />
-          {node.people}
+        <span className="truncate">
+          {node.node_category ? `分类：${node.node_category}` : "未分类"} · 源自 {node.source_chunk_count} 个片段
         </span>
+        {node.expansion_count > 0 && (
+          <span className="ml-auto inline-flex items-center gap-1 text-brand">
+            <Icon name="sparkles" className="h-3.5 w-3.5" />
+            {node.expansion_count} 条扩展
+          </span>
+        )}
       </div>
     </article>
   );
 }
 
-function MiniPeople() {
-  return (
-    <span className="flex -space-x-1">
-      <span className="h-5 w-5 rounded-full bg-[radial-gradient(circle_at_50%_28%,#f8d5c2_0_18%,#233a70_19%_46%,#111827_47%)] ring-2 ring-white" />
-      <span className="h-5 w-5 rounded-full bg-[radial-gradient(circle_at_50%_28%,#ffd6cc_0_18%,#7c3aed_19%_46%,#312e81_47%)] ring-2 ring-white" />
-    </span>
-  );
-}
+function Pagination({
+  total,
+  page,
+  onPageChange,
+}: {
+  total: number;
+  page: number;
+  onPageChange: (p: number) => void;
+}) {
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // 围绕当前页的页码窗口（最多 5 个）
+  const windowSize = 5;
+  let start = Math.max(1, page - 2);
+  const end = Math.min(pageCount, start + windowSize - 1);
+  start = Math.max(1, end - windowSize + 1);
+  const pages: number[] = [];
+  for (let p = start; p <= end; p++) pages.push(p);
 
-function Pagination() {
   return (
     <div className="mt-5 flex items-center justify-between text-[13px] text-slate-500">
-      <span>共 368 条</span>
+      <span>共 {fmtNum(total)} 条</span>
       <div className="flex items-center gap-2">
-        <PageButton icon="chevron-left" />
-        {[1, 2, 3, 4, 5].map((page) => (
+        <PageButton
+          icon="chevron-left"
+          disabled={page <= 1}
+          onClick={() => onPageChange(page - 1)}
+        />
+        {pages.map((p) => (
           <button
-            key={page}
+            key={p}
+            onClick={() => onPageChange(p)}
             className={cn(
               "h-9 w-9 rounded-lg border text-[13px] font-semibold",
-              page === 1 ? "border-brand text-brand" : "border-line bg-white text-slate-600"
+              p === page ? "border-brand text-brand" : "border-line bg-white text-slate-600 hover:bg-slate-50"
             )}
           >
-            {page}
+            {p}
           </button>
         ))}
-        <span className="px-2">...</span>
-        <button className="h-9 w-9 rounded-lg border border-line bg-white text-[13px] font-semibold text-slate-600">19</button>
-        <PageButton icon="chevron-right" />
-        <button className="ml-4 flex h-9 items-center gap-2 rounded-lg border border-line bg-white px-4 text-[13px] font-semibold text-slate-600">
-          20 条/页
-          <Icon name="chevron-down" className="h-3.5 w-3.5" />
-        </button>
-        <span className="ml-3">跳至</span>
-        <button className="h-9 w-16 rounded-lg border border-line bg-white text-ink">1</button>
-        <span>页</span>
+        {end < pageCount && (
+          <>
+            <span className="px-2">...</span>
+            <button
+              onClick={() => onPageChange(pageCount)}
+              className="h-9 w-9 rounded-lg border border-line bg-white text-[13px] font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              {pageCount}
+            </button>
+          </>
+        )}
+        <PageButton
+          icon="chevron-right"
+          disabled={page >= pageCount}
+          onClick={() => onPageChange(page + 1)}
+        />
+        <span className="ml-4 flex h-9 items-center gap-2 rounded-lg border border-line bg-white px-4 text-[13px] font-semibold text-slate-600">
+          {PAGE_SIZE} 条/页
+        </span>
       </div>
     </div>
   );
 }
 
-function PageButton({ icon }: { icon: string }) {
+function PageButton({
+  icon,
+  disabled,
+  onClick,
+}: {
+  icon: string;
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
   return (
-    <button className="flex h-9 w-9 items-center justify-center rounded-lg border border-line bg-white text-slate-500">
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="flex h-9 w-9 items-center justify-center rounded-lg border border-line bg-white text-slate-500 disabled:cursor-not-allowed disabled:opacity-40 hover:bg-slate-50"
+    >
       <Icon name={icon} className="h-4 w-4" />
     </button>
   );

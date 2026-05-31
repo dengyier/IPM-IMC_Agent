@@ -20,17 +20,23 @@ from app.db.models import (
 from app.db.session import get_db
 from app.graphs.methodology_kernel_graph import MethodologyKernelBuildGraph
 from app.schemas.methodology import (
-    BuildKernelResult,
     GenerateRoutingRulesResult,
     MethodologyEdgeOut,
     MethodologyNodeOut,
     MethodologySourceOut,
+    NodeCategoryCount,
+    NodeEdgeOut,
+    NodeExpansionOut,
+    NodeVersionOut,
+    PaginatedNodes,
     ProblemRoutingRuleOut,
-    ProcessSourceResult,
     UploadSourceResult,
 )
+from app.schemas.task import TaskCreated
+from app.services import task_service
 from app.services.embeddings import EmbeddingProvider
 from app.services.llm import LLMService
+from app.services.methodology_query_service import MethodologyQueryService
 from app.services.problem_routing_service import ProblemRoutingService
 from app.services.storage import LocalStorage
 from app.services.vector_store import VectorStore
@@ -115,36 +121,48 @@ def list_sources(db: Session = Depends(get_db)) -> list[MethodologySource]:
     )
 
 
-@router.post("/sources/{source_id}/process", response_model=ProcessSourceResult)
+@router.post("/sources/{source_id}/process", response_model=TaskCreated)
 def process_source(
     source_id: str,
     db: Session = Depends(get_db),
-    embeddings: EmbeddingProvider = Depends(get_embeddings),
-    core_store: VectorStore = Depends(get_core_store),
-    llm: LLMService = Depends(get_llm),
-) -> ProcessSourceResult:
-    source = _get_source(db, source_id)
-    graph = _build_graph(db, embeddings, core_store, llm)
-    try:
+) -> TaskCreated:
+    """解析+入库为长任务：立即返回 task_id，前端轮询 /api/tasks/{id}。"""
+    _get_source(db, source_id)  # 校验存在性，不存在直接 404
+
+    def work(bg: Session):
+        source = bg.get(MethodologySource, source_id)
+        if source is None:
+            raise ValueError("来源不存在")
+        graph = _build_graph(bg, get_embeddings(), get_core_store(), get_llm())
         return graph.run_process(source)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    task = task_service.create_task(
+        db, "methodology.process", resource_id=source_id
+    )
+    task_service.dispatch(task.id, work)
+    return TaskCreated(task_id=task.id)
 
 
-@router.post("/sources/{source_id}/build-kernel", response_model=BuildKernelResult)
+@router.post("/sources/{source_id}/build-kernel", response_model=TaskCreated)
 def build_kernel(
     source_id: str,
     db: Session = Depends(get_db),
-    embeddings: EmbeddingProvider = Depends(get_embeddings),
-    core_store: VectorStore = Depends(get_core_store),
-    llm: LLMService = Depends(get_llm),
-) -> BuildKernelResult:
-    source = _get_source(db, source_id)
-    graph = _build_graph(db, embeddings, core_store, llm)
-    try:
+) -> TaskCreated:
+    """构建知识内核（节点+边）为长任务（实测可达数十分钟）。"""
+    _get_source(db, source_id)
+
+    def work(bg: Session):
+        source = bg.get(MethodologySource, source_id)
+        if source is None:
+            raise ValueError("来源不存在")
+        graph = _build_graph(bg, get_embeddings(), get_core_store(), get_llm())
         return graph.run_build(source)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    task = task_service.create_task(
+        db, "methodology.build_kernel", resource_id=source_id
+    )
+    task_service.dispatch(task.id, work)
+    return TaskCreated(task_id=task.id)
 
 
 # --------------------------------------------------------------------------- #
@@ -152,15 +170,24 @@ def build_kernel(
 # --------------------------------------------------------------------------- #
 
 
-@router.get("/nodes", response_model=list[MethodologyNodeOut])
+@router.get("/nodes", response_model=PaginatedNodes)
 def list_nodes(
     category: str | None = None,
+    q: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
     db: Session = Depends(get_db),
-) -> list[MethodologyNode]:
-    query = db.query(MethodologyNode).filter(MethodologyNode.status == "active")
-    if category:
-        query = query.filter(MethodologyNode.node_category == category)
-    return query.order_by(MethodologyNode.created_at.desc()).all()
+) -> PaginatedNodes:
+    return MethodologyQueryService(db).list_nodes(
+        category=category, q=q, page=page, page_size=page_size
+    )
+
+
+@router.get("/nodes/categories", response_model=list[NodeCategoryCount])
+def list_node_categories(
+    top: int = 8, db: Session = Depends(get_db)
+) -> list[NodeCategoryCount]:
+    return MethodologyQueryService(db).categories(top=top)
 
 
 @router.get("/nodes/{node_id}", response_model=MethodologyNodeOut)
@@ -169,6 +196,31 @@ def get_node(node_id: str, db: Session = Depends(get_db)) -> MethodologyNode:
     if not node:
         raise HTTPException(status_code=404, detail="节点不存在")
     return node
+
+
+@router.get("/nodes/{node_id}/edges", response_model=list[NodeEdgeOut])
+def get_node_edges(node_id: str, db: Session = Depends(get_db)) -> list[NodeEdgeOut]:
+    if not db.get(MethodologyNode, node_id):
+        raise HTTPException(status_code=404, detail="节点不存在")
+    return MethodologyQueryService(db).node_edges(node_id)
+
+
+@router.get("/nodes/{node_id}/versions", response_model=list[NodeVersionOut])
+def get_node_versions(
+    node_id: str, db: Session = Depends(get_db)
+) -> list[NodeVersionOut]:
+    if not db.get(MethodologyNode, node_id):
+        raise HTTPException(status_code=404, detail="节点不存在")
+    return MethodologyQueryService(db).node_versions(node_id)
+
+
+@router.get("/nodes/{node_id}/expansions", response_model=list[NodeExpansionOut])
+def get_node_expansions(
+    node_id: str, db: Session = Depends(get_db)
+) -> list[NodeExpansionOut]:
+    if not db.get(MethodologyNode, node_id):
+        raise HTTPException(status_code=404, detail="节点不存在")
+    return MethodologyQueryService(db).node_expansions(node_id)
 
 
 @router.get("/edges", response_model=list[MethodologyEdgeOut])

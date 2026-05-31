@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_core_store, get_embeddings, get_llm
@@ -16,36 +16,37 @@ from app.db.session import get_db
 from app.graphs.business_canvas_diagnosis_graph import BusinessCanvasDiagnosisGraph
 from app.schemas.diagnosis import (
     DiagnoseRequest,
-    DiagnoseResult,
     DiagnosisReportOut,
     QualityCheckOut,
 )
-from app.services.embeddings import EmbeddingProvider
-from app.services.llm import LLMService
-from app.services.vector_store import VectorStore
+from app.schemas.task import TaskCreated
+from app.services import task_service
 
 router = APIRouter(prefix="/api/diagnosis", tags=["diagnosis"])
 
 
-@router.post("/diagnose", response_model=DiagnoseResult)
+@router.post("/diagnose", response_model=TaskCreated)
 def diagnose(
     request: DiagnoseRequest,
     db: Session = Depends(get_db),
-    embeddings: EmbeddingProvider = Depends(get_embeddings),
-    core_store: VectorStore = Depends(get_core_store),
-    llm: LLMService = Depends(get_llm),
-) -> DiagnoseResult:
-    graph = BusinessCanvasDiagnosisGraph(
-        db=db,
-        settings=get_settings(),
-        embeddings=embeddings,
-        core_store=core_store,
-        llm=llm,
-    )
-    try:
+) -> TaskCreated:
+    """生成诊断报告为长任务（数十秒~分钟级）：返回 task_id，前端轮询取 result。"""
+
+    def work(bg: Session):
+        graph = BusinessCanvasDiagnosisGraph(
+            db=bg,
+            settings=get_settings(),
+            embeddings=get_embeddings(),
+            core_store=get_core_store(),
+            llm=get_llm(),
+        )
         return graph.run(request)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    task = task_service.create_task(
+        db, "diagnosis.diagnose", input=request.model_dump(mode="json")
+    )
+    task_service.dispatch(task.id, work)
+    return TaskCreated(task_id=task.id)
 
 
 @router.get("/reports", response_model=list[DiagnosisReportOut])
@@ -59,6 +60,57 @@ def get_report(report_id: str, db: Session = Depends(get_db)) -> DiagnosisReport
     if not report:
         raise HTTPException(status_code=404, detail="报告不存在")
     return report
+
+
+@router.post("/reports/{report_id}/regenerate", response_model=TaskCreated)
+def regenerate_report(report_id: str, db: Session = Depends(get_db)) -> TaskCreated:
+    """以原报告的输入（标题/问题/公司/画布）重跑诊断，生成一份新报告（异步）。
+
+    诊断图每次 run 都会落一份新报告，故重新生成不覆盖原报告，结果含新 report_id。
+    """
+    report = db.get(DiagnosisReport, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="报告不存在")
+
+    request = DiagnoseRequest(
+        title=report.title,
+        question=report.question or "",
+        company_name=report.company_name,
+        canvas=dict(report.canvas_input or {}),
+    )
+
+    def work(bg: Session):
+        graph = BusinessCanvasDiagnosisGraph(
+            db=bg,
+            settings=get_settings(),
+            embeddings=get_embeddings(),
+            core_store=get_core_store(),
+            llm=get_llm(),
+        )
+        return graph.run(request)
+
+    task = task_service.create_task(
+        db,
+        "diagnosis.regenerate",
+        input=request.model_dump(mode="json"),
+        resource_id=report_id,
+    )
+    task_service.dispatch(task.id, work)
+    return TaskCreated(task_id=task.id)
+
+
+@router.delete("/reports/{report_id}", status_code=204)
+def delete_report(report_id: str, db: Session = Depends(get_db)) -> Response:
+    """删除报告及其关联质检结果（质检对报告有外键，需先删）。"""
+    report = db.get(DiagnosisReport, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="报告不存在")
+    db.query(ReportQualityCheck).filter(
+        ReportQualityCheck.report_id == report_id
+    ).delete(synchronize_session=False)
+    db.delete(report)
+    db.commit()
+    return Response(status_code=204)
 
 
 @router.get("/reports/{report_id}/quality", response_model=QualityCheckOut)

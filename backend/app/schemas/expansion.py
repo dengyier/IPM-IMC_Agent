@@ -81,6 +81,48 @@ class ReviewTaskOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# --------------------------------------------------------------------------- #
+# Detail（详情面板：条目 + 来源 + 对齐节点；审核任务 = 任务 + 条目详情）
+# --------------------------------------------------------------------------- #
+
+
+class ExpansionSourceBrief(BaseModel):
+    """详情面板用的来源摘要（提交人/类型/可见性）。"""
+
+    id: str
+    title: str
+    source_type: str
+    submitted_by: str | None = None
+    visibility: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AlignedNodeBrief(BaseModel):
+    """扩展条目「建议合并位置」——对齐到的核心节点摘要。"""
+
+    id: str
+    node_name: str
+    node_category: str | None = None
+    version: str
+
+    model_config = {"from_attributes": True}
+
+
+class ExpansionItemDetailOut(ExpansionItemOut):
+    """扩展条目详情：在列表字段基础上内联来源与对齐节点。"""
+
+    source: ExpansionSourceBrief | None = None
+    aligned_node: AlignedNodeBrief | None = None
+
+
+class ReviewTaskDetailOut(ReviewTaskOut):
+    """审核任务详情：任务 + 完整扩展条目（含来源 / 对齐节点），一次取齐详情面板所需。"""
+
+    item: ExpansionItemDetailOut | None = None
+
+
 class ReviewDecisionRequest(BaseModel):
     decision: ReviewStatus
     reviewer: str | None = None

@@ -22,12 +22,16 @@ from app.db.session import get_db
 from app.graphs.external_info_evolution_graph import ExternalInfoEvolutionGraph
 from app.schemas.expansion import (
     AbsorbExpansionResult,
+    AlignedNodeBrief,
     EvolveNodeResult,
+    ExpansionItemDetailOut,
     ExpansionItemOut,
+    ExpansionSourceBrief,
     ExpansionSourceOut,
     KnowledgeNodeVersionOut,
     ReviewDecisionRequest,
     ReviewDecisionResult,
+    ReviewTaskDetailOut,
     ReviewTaskOut,
     UploadExpansionResult,
 )
@@ -141,6 +145,29 @@ def list_items(
     return query.order_by(ExpansionItem.created_at.desc()).all()
 
 
+def _build_item_detail(
+    db: Session, item: ExpansionItem
+) -> ExpansionItemDetailOut:
+    """把扩展条目装配成详情：内联来源摘要 + 对齐节点摘要。"""
+    detail = ExpansionItemDetailOut.model_validate(item)
+    source = db.get(ExpansionSource, item.source_id)
+    if source:
+        detail.source = ExpansionSourceBrief.model_validate(source)
+    if item.aligned_node_id:
+        node = db.get(MethodologyNode, item.aligned_node_id)
+        if node:
+            detail.aligned_node = AlignedNodeBrief.model_validate(node)
+    return detail
+
+
+@router.get("/items/{item_id}", response_model=ExpansionItemDetailOut)
+def get_item(item_id: str, db: Session = Depends(get_db)) -> ExpansionItemDetailOut:
+    item = db.get(ExpansionItem, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="扩展条目不存在")
+    return _build_item_detail(db, item)
+
+
 # --------------------------------------------------------------------------- #
 # node versions
 # --------------------------------------------------------------------------- #
@@ -190,6 +217,19 @@ def list_review_tasks(
     if status != "all":
         query = query.filter(ReviewTask.status == status)
     return query.order_by(ReviewTask.created_at).all()
+
+
+@review_router.get("/tasks/{task_id}", response_model=ReviewTaskDetailOut)
+def get_review_task(task_id: str, db: Session = Depends(get_db)) -> ReviewTaskDetailOut:
+    """审核任务详情：任务字段 + 关联扩展条目（含来源、对齐节点），供详情面板一次取齐。"""
+    task = db.get(ReviewTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="审核任务不存在")
+    detail = ReviewTaskDetailOut.model_validate(task)
+    item = db.get(ExpansionItem, task.item_id)
+    if item:
+        detail.item = _build_item_detail(db, item)
+    return detail
 
 
 @review_router.post("/tasks/{task_id}/decide", response_model=ReviewDecisionResult)

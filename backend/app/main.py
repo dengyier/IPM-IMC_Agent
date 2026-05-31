@@ -10,7 +10,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routers import diagnosis, expansion, methodology, system
+from app.api.errors import install_error_handlers
+from app.api.routers import (
+    dashboard,
+    diagnosis,
+    expansion,
+    methodology,
+    system,
+    tasks,
+)
 from app.core.config import get_settings
 from app.db.session import init_db
 
@@ -33,7 +41,11 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    install_error_handlers(app)
+
     app.include_router(system.router)
+    app.include_router(tasks.router)
+    app.include_router(dashboard.router)
     app.include_router(methodology.router)
     app.include_router(expansion.router)
     app.include_router(expansion.review_router)

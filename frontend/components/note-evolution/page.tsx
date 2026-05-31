@@ -1,60 +1,125 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+
 import { Card } from "@/components/card";
 import { Icon } from "@/components/icon";
+import {
+  AbsorbResult,
+  ApiError,
+  ExpansionItemDetail,
+  ExpansionSource,
+  expansionApi,
+} from "@/lib/api";
+import { extensionTypeLabel, reviewStatusTone } from "@/lib/presentation";
 import { cn } from "@/lib/utils";
 
-const steps = [
+const STEPS = [
   { title: "提交笔记", desc: "上传或粘贴同学笔记" },
-  { title: "解析与理解", desc: "AI 理解笔记内容" },
-  { title: "匹配知识节点", desc: "找到最相关的节点" },
-  { title: "提取增量内容", desc: "提取观点/案例/场景" },
-  { title: "生成进化建议", desc: "形成结构化建议" },
+  { title: "解析与理解", desc: "AI 切块 + 向量化" },
+  { title: "匹配知识节点", desc: "对齐最相关的核心节点" },
+  { title: "提取增量内容", desc: "生成扩展条目" },
+  { title: "生成审核任务", desc: "进入人工审核闸口" },
 ];
 
-const matchedNodes = [
-  { icon: "clipboard-check", title: "价值主张", sub: "商业画布 · 核心模块", rate: "95%", width: "95%", tag: "强相关", tone: "bg-violet-50 text-brand" },
-  { icon: "file-text", title: "最小可行验证", sub: "关键活动 · 方法论", rate: "87%", width: "87%", tag: "强相关", tone: "bg-orange-50 text-orange-500" },
-  { icon: "file-check", title: "客户细分", sub: "商业画布 · 核心模块", rate: "78%", width: "78%", tag: "相关", tone: "bg-emerald-50 text-emerald-600" },
-];
+type Phase = "idle" | "uploading" | "absorbing" | "done" | "error";
+type Mode = "upload" | "paste";
 
-const insightCards = [
-  {
-    title: "新增观点（2条）",
-    body: ["早期验证价值主张时，不应先做完整产品，而应先验证用户是否愿意为核心价值付费。", "价值主张验证的关键不是“有多少用户喜欢”，而是“有多少用户愿意长期使用”。"],
-  },
-  {
-    title: "新增案例（1个）",
-    body: ["某智能硬件团队通过做“功能最小化原型”，仅用 2 周完成 30 位目标用户的付费意愿测试，验证了核心价值主张。"],
-  },
-  {
-    title: "应用场景扩展（1条）",
-    body: ["将该方法应用于 B 端企业服务场景：通过小范围客户深度访谈 + 低保真方案验证付费意愿。"],
-  },
-];
-
-const prompts = [
-  "这篇笔记能补充哪些知识节点？",
-  "有哪些新的观点或案例？",
-  "是否与老师观点存在差异？",
-  "建议如何合并到知识体系中？",
-];
-
-const history = [
-  { title: "从0到1验证价值主张的3...", meta: "李同学 · 商业画布", status: "分析完成", tone: "bg-emerald-50 text-emerald-600" },
-  { title: "To B 产品的获客思路拆解", meta: "王同学 · 渠道通路", status: "待审核", tone: "bg-orange-50 text-orange-500" },
-  { title: "SaaS 付费模式的思考", meta: "张同学 · 收入来源", status: "已合并", tone: "bg-emerald-50 text-emerald-600" },
-  { title: "品牌定位的用户洞察方法", meta: "陈同学 · 价值主张", status: "分歧归纳", tone: "bg-green-50 text-green-600" },
-];
+const pct = (v: number) => Math.round((v ?? 0) * 100);
 
 export function NoteEvolutionPage() {
+  const [mode, setMode] = useState<Mode>("upload");
+  const [title, setTitle] = useState("");
+  const [author, setAuthor] = useState("");
+  const [text, setText] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [absorb, setAbsorb] = useState<AbsorbResult | null>(null);
+  const [items, setItems] = useState<ExpansionItemDetail[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const canSubmit =
+    title.trim().length > 0 &&
+    (mode === "upload" ? !!file : text.trim().length > 0) &&
+    phase !== "uploading" &&
+    phase !== "absorbing";
+
+  async function handleSubmit() {
+    if (!canSubmit) return;
+    setPhase("uploading");
+    setAbsorb(null);
+    setItems([]);
+    setStatusMsg("上传中…");
+    try {
+      const uploadFile =
+        mode === "upload" && file
+          ? file
+          : new File([text], `${title.trim() || "note"}.txt`, { type: "text/plain" });
+
+      const up = await expansionApi.uploadSource(uploadFile, {
+        title: title.trim(),
+        source_type: "classmate_note",
+        submitted_by: author.trim() || undefined,
+        visibility: "team",
+      });
+
+      setPhase("absorbing");
+      setStatusMsg("AI 解析与吸收中（切块、向量化、对齐节点）…");
+      const res = await expansionApi.absorb(up.source_id);
+      setAbsorb(res);
+
+      // 拉取本次来源生成的扩展条目（列表按 source_id 客户端过滤），再取详情拿对齐节点
+      const all = await expansionApi.items({ reviewStatus: "pending" });
+      const mine = all.filter((it) => it.source_id === up.source_id);
+      const details = await Promise.all(mine.map((it) => expansionApi.item(it.id)));
+      setItems(details);
+
+      setPhase("done");
+      setStatusMsg(null);
+    } catch (e) {
+      setPhase("error");
+      setStatusMsg(e instanceof ApiError ? `处理失败：${e.message}` : "处理失败");
+    }
+  }
+
+  const activeIndex =
+    phase === "idle" || phase === "uploading"
+      ? 0
+      : phase === "absorbing"
+        ? 1
+        : phase === "done"
+          ? 4
+          : 0;
+
   return (
     <main className="flex min-w-0 flex-1 overflow-hidden">
       <section className="flex min-w-0 flex-1 flex-col overflow-y-auto px-8 py-6">
         <NoteHeader />
-        <StepBar />
-        <SubmitNote />
-        <AnalysisResult />
+        <StepBar activeIndex={activeIndex} done={phase === "done"} />
+        <SubmitNote
+          mode={mode}
+          title={title}
+          author={author}
+          text={text}
+          file={file}
+          phase={phase}
+          statusMsg={statusMsg}
+          canSubmit={canSubmit}
+          inputRef={inputRef}
+          onMode={setMode}
+          onTitle={setTitle}
+          onAuthor={setAuthor}
+          onText={setText}
+          onFile={setFile}
+          onSubmit={handleSubmit}
+        />
+        {absorb && <AnalysisResult absorb={absorb} items={items} />}
+        <p className="py-5 text-center text-[12px] text-slate-400">
+          外部资料仅进入扩展层，必须经人工审核后方可演进核心节点版本
+        </p>
       </section>
-      <NoteAssistant />
+      <NoteAside />
     </main>
   );
 }
@@ -68,116 +133,177 @@ function NoteHeader() {
           上传课后协同学习笔记，智能识别并匹配知识节点，让集体智慧反哺课程方法论
         </p>
       </div>
-      <div className="flex items-center gap-4">
-        <button className="h-10 rounded-xl bg-[#f0edff] px-4 text-[12px] font-bold text-brand">
-          说明 DeepSeek-R1 分析中
-        </button>
-        <button className="flex h-10 items-center gap-2 rounded-xl border border-line bg-white px-4 text-[12px] font-bold text-[#172452]">
-          本月已处理 <span className="text-brand">23 份</span>
-          <Icon name="chevron-down" className="h-3.5 w-3.5 text-slate-400" />
-        </button>
-        <TopActions />
-      </div>
     </header>
   );
 }
 
-function TopActions() {
-  return (
-    <div className="flex shrink-0 items-center gap-5">
-      <button className="relative flex h-10 w-10 items-center justify-center rounded-full text-[#172452] hover:bg-white">
-        <Icon name="bell" className="h-[19px] w-[19px]" />
-        <span className="absolute right-0 top-0 h-4 min-w-4 rounded-full bg-rose-500 px-1 text-center text-[10px] font-semibold leading-4 text-white ring-2 ring-white">
-          8
-        </span>
-      </button>
-      <div className="h-10 w-px bg-line" />
-      <div className="h-10 w-10 rounded-full bg-[radial-gradient(circle_at_50%_28%,#f8d5c2_0_18%,#233a70_19%_46%,#111827_47%)] ring-4 ring-white" />
-      <div className="leading-tight">
-        <div className="text-[13px] font-bold text-ink">张晓明</div>
-        <div className="text-[11px] text-slate-400">管理员</div>
-      </div>
-      <Icon name="chevron-down" className="h-4 w-4 text-slate-400" />
-    </div>
-  );
-}
-
-function StepBar() {
+function StepBar({ activeIndex, done }: { activeIndex: number; done: boolean }) {
   return (
     <Card className="mt-7 px-7 py-6">
       <div className="grid grid-cols-5 gap-4">
-        {steps.map((step, index) => (
-          <div key={step.title} className="relative flex items-center">
-            {index > 0 && <span className="absolute right-[58%] top-[20px] h-px w-full bg-line" />}
-            <div className="relative z-10 flex items-start gap-3">
-              <span
-                className={cn(
-                  "mt-1 flex h-7 w-7 items-center justify-center rounded-full text-[12px] font-black",
-                  index === 0 ? "brand-gradient text-white" : "bg-slate-100 text-slate-400"
-                )}
-              >
-                {index + 1}
-              </span>
-              <div>
-                <div className={cn("text-[15px] font-black", index === 0 ? "text-brand" : "text-[#172452]")}>{step.title}</div>
-                <div className="mt-1 text-[11px] font-semibold text-slate-400">{step.desc}</div>
+        {STEPS.map((step, index) => {
+          const active = index === activeIndex;
+          const isDone = done ? true : index < activeIndex;
+          return (
+            <div key={step.title} className="relative flex items-center">
+              {index > 0 && <span className="absolute right-[58%] top-[20px] h-px w-full bg-line" />}
+              <div className="relative z-10 flex items-start gap-3">
+                <span
+                  className={cn(
+                    "mt-1 flex h-7 w-7 items-center justify-center rounded-full text-[12px] font-black",
+                    active ? "brand-gradient text-white" : isDone ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-400"
+                  )}
+                >
+                  {isDone && !active ? "✓" : index + 1}
+                </span>
+                <div>
+                  <div className={cn("text-[15px] font-black", active ? "text-brand" : "text-[#172452]")}>
+                    {step.title}
+                  </div>
+                  <div className="mt-1 text-[11px] font-semibold text-slate-400">{step.desc}</div>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </Card>
   );
 }
 
-function SubmitNote() {
+function SubmitNote({
+  mode,
+  title,
+  author,
+  text,
+  file,
+  phase,
+  statusMsg,
+  canSubmit,
+  inputRef,
+  onMode,
+  onTitle,
+  onAuthor,
+  onText,
+  onFile,
+  onSubmit,
+}: {
+  mode: Mode;
+  title: string;
+  author: string;
+  text: string;
+  file: File | null;
+  phase: Phase;
+  statusMsg: string | null;
+  canSubmit: boolean;
+  inputRef: React.RefObject<HTMLInputElement>;
+  onMode: (m: Mode) => void;
+  onTitle: (v: string) => void;
+  onAuthor: (v: string) => void;
+  onText: (v: string) => void;
+  onFile: (f: File | null) => void;
+  onSubmit: () => void;
+}) {
+  const busy = phase === "uploading" || phase === "absorbing";
   return (
     <Card className="mt-5 px-6 py-5">
       <h2 className="text-[18px] font-black text-ink">提交笔记</h2>
       <div className="mt-4 grid gap-6 xl:grid-cols-[0.9fr_1.25fr]">
         <div>
           <div className="flex gap-3">
-            <button className="flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-4 text-[13px] font-bold text-brand">
+            <button
+              onClick={() => onMode("upload")}
+              className={cn(
+                "flex h-10 items-center gap-2 rounded-lg border px-4 text-[13px] font-bold",
+                mode === "upload" ? "border-brand text-brand" : "border-line bg-white text-slate-500"
+              )}
+            >
               <Icon name="file-text" className="h-4 w-4" />
               上传文件
             </button>
-            <button className="flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-4 text-[13px] font-bold text-slate-500">
+            <button
+              onClick={() => onMode("paste")}
+              className={cn(
+                "flex h-10 items-center gap-2 rounded-lg border px-4 text-[13px] font-bold",
+                mode === "paste" ? "border-brand text-brand" : "border-line bg-white text-slate-500"
+              )}
+            >
               <Icon name="clipboard-check" className="h-4 w-4" />
               粘贴文本
             </button>
-            <button className="flex h-10 items-center gap-2 rounded-lg border border-line bg-white px-4 text-[13px] font-bold text-slate-500">
-              <Icon name="pencil" className="h-4 w-4" />
-              手动输入
-            </button>
           </div>
-          <div className="mt-4 flex h-[190px] flex-col items-center justify-center rounded-xl border border-dashed border-[#cdd6ff] bg-[#f8faff]">
-            <Icon name="upload-cloud" className="h-10 w-10 text-brand" />
-            <div className="mt-5 text-[14px] font-black text-[#172452]">点击或拖拽文件到此处</div>
-            <div className="mt-3 text-[12px] font-semibold text-slate-400">支持 PDF、Word、TXT、MD 格式，单个文件不超过 50MB</div>
-          </div>
-        </div>
-        <div className="grid gap-5">
-          <Field label="笔记信息" required>
-            <input className="h-11 w-full rounded-lg border border-line bg-white px-4 text-[13px] font-semibold text-[#172452] outline-none" defaultValue="笔记标题：从0到1验证价值主张的3个关键动作" />
-          </Field>
-          <div className="grid gap-5 md:grid-cols-2">
-            <Field label="所属课程/主题" required>
-              <button className="flex h-11 w-full items-center justify-between rounded-lg border border-line bg-white px-4 text-[13px] font-semibold text-[#172452]">
-                商业画布
-                <Icon name="chevron-down" className="h-4 w-4 text-slate-400" />
+
+          {mode === "upload" ? (
+            <>
+              <input
+                ref={inputRef}
+                type="file"
+                accept=".pdf,.docx,.txt,.md,.pptx"
+                className="hidden"
+                onChange={(e) => onFile(e.target.files?.[0] ?? null)}
+              />
+              <button
+                onClick={() => inputRef.current?.click()}
+                className="mt-4 flex h-[190px] w-full flex-col items-center justify-center rounded-xl border border-dashed border-[#cdd6ff] bg-[#f8faff]"
+              >
+                <Icon name="upload-cloud" className="h-10 w-10 text-brand" />
+                <div className="mt-4 text-[14px] font-black text-[#172452]">
+                  {file ? file.name : "点击选择文件"}
+                </div>
+                <div className="mt-3 text-[12px] font-semibold text-slate-400">
+                  支持 PDF、DOCX、PPTX、TXT、MD
+                </div>
               </button>
-            </Field>
-            <Field label="笔记作者" required>
-              <input className="h-11 w-full rounded-lg border border-line bg-white px-4 text-[13px] font-semibold text-[#172452] outline-none" defaultValue="李同学" />
-            </Field>
-          </div>
-          <div className="grid gap-5 md:grid-cols-2">
-            <Field label="行业/场景（可选）">
-              <input className="h-11 w-full rounded-lg border border-line bg-white px-4 text-[13px] font-semibold text-[#172452] outline-none" defaultValue="智能硬件 / 消费电子" />
-            </Field>
-            <button className="brand-gradient mt-[26px] flex h-11 items-center justify-center gap-2 rounded-xl text-[14px] font-bold text-white shadow-soft">
-              <Icon name="sparkles" className="h-4 w-4" />
-              开始分析
+            </>
+          ) : (
+            <textarea
+              value={text}
+              onChange={(e) => onText(e.target.value)}
+              placeholder="粘贴同学笔记原文…"
+              className="mt-4 h-[190px] w-full resize-none rounded-xl border border-line bg-white px-4 py-3 text-[13px] font-medium leading-6 text-[#172452] outline-none placeholder:text-slate-400"
+            />
+          )}
+        </div>
+
+        <div className="grid content-start gap-5">
+          <Field label="笔记标题" required>
+            <input
+              value={title}
+              onChange={(e) => onTitle(e.target.value)}
+              placeholder="如：从0到1验证价值主张的3个关键动作"
+              className="h-11 w-full rounded-lg border border-line bg-white px-4 text-[13px] font-semibold text-[#172452] outline-none placeholder:text-slate-400"
+            />
+          </Field>
+          <Field label="笔记作者">
+            <input
+              value={author}
+              onChange={(e) => onAuthor(e.target.value)}
+              placeholder="如：李同学"
+              className="h-11 w-full rounded-lg border border-line bg-white px-4 text-[13px] font-semibold text-[#172452] outline-none placeholder:text-slate-400"
+            />
+          </Field>
+          <div className="flex items-center gap-4">
+            {statusMsg && (
+              <span className={cn("text-[12.5px] font-bold", phase === "error" ? "text-rose-500" : "text-brand")}>
+                {statusMsg}
+              </span>
+            )}
+            <button
+              onClick={onSubmit}
+              disabled={!canSubmit}
+              className="brand-gradient ml-auto flex h-11 w-[200px] items-center justify-center gap-2 rounded-xl text-[14px] font-bold text-white shadow-soft disabled:opacity-50"
+            >
+              {busy ? (
+                <>
+                  <Icon name="refresh" className="h-4 w-4 animate-spin" />
+                  {phase === "uploading" ? "上传中…" : "分析中…"}
+                </>
+              ) : (
+                <>
+                  <Icon name="sparkles" className="h-4 w-4" />
+                  开始分析
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -198,8 +324,15 @@ function Field({ label, required, children }: { label: string; required?: boolea
   );
 }
 
-function AnalysisResult() {
-  const tabs = ["匹配结果", "增量内容提取", "与老师观点关系", "进化建议", "影响预览"];
+function AnalysisResult({ absorb, items }: { absorb: AbsorbResult; items: ExpansionItemDetail[] }) {
+  // 去重后的对齐节点
+  const matchedNodes = Array.from(
+    new Map(
+      items
+        .filter((it) => it.aligned_node)
+        .map((it) => [it.aligned_node!.id, { node: it.aligned_node!, score: it.alignment_score }])
+    ).values()
+  ).sort((a, b) => b.score - a.score);
 
   return (
     <Card className="mt-5 overflow-hidden">
@@ -208,116 +341,136 @@ function AnalysisResult() {
         <span className="ml-3 rounded-full bg-emerald-50 px-3 py-1 text-[12px] font-bold text-emerald-600">
           分析完成
         </span>
-        <div className="ml-auto flex items-center gap-3 text-[13px] font-bold text-[#172452]">
-          置信度：89%
-          <span className="relative h-8 w-8 rounded-full border-[3px] border-blue-500 border-l-blue-100" />
-        </div>
+        <a href="/review" className="ml-auto flex items-center gap-1.5 text-[13px] font-bold text-brand">
+          去人工审核台
+          <Icon name="chevron-right" className="h-4 w-4" />
+        </a>
       </div>
-      <div className="flex gap-9 border-b border-line px-6">
-        {tabs.map((tab, index) => (
-          <button
-            key={tab}
-            className={cn(
-              "relative py-4 text-[13px] font-bold",
-              index === 0 ? "text-brand after:absolute after:bottom-0 after:left-0 after:h-0.5 after:w-full after:bg-brand" : "text-slate-500"
-            )}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
+
       <div className="px-6 py-6">
-        <h3 className="text-[15px] font-black text-ink">匹配的知识节点（3个）</h3>
-        <div className="mt-5 space-y-5">
-          {matchedNodes.map((node) => (
-            <MatchedNode key={node.title} node={node} />
+        {/* 吸收统计 */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {[
+            { label: "切块", value: absorb.chunk_count },
+            { label: "已向量化", value: absorb.embedded_count },
+            { label: "扩展条目", value: absorb.item_count },
+            { label: "审核任务", value: absorb.review_task_count },
+          ].map((s) => (
+            <div key={s.label} className="rounded-2xl bg-[#f8faff] px-4 py-3 text-center">
+              <div className="text-[24px] font-black tracking-[-0.02em] text-ink">{s.value}</div>
+              <div className="mt-1 text-[12px] font-medium text-slate-400">{s.label}</div>
+            </div>
           ))}
         </div>
-        <div className="mt-7 grid gap-5 xl:grid-cols-3">
-          {insightCards.map((card) => (
-            <InsightCard key={card.title} card={card} />
-          ))}
+        <p className="mt-2 text-[11px] text-slate-400">向量后端：{absorb.vector_backend}</p>
+
+        {/* 匹配的知识节点 */}
+        <h3 className="mt-7 text-[15px] font-black text-ink">匹配的知识节点（{matchedNodes.length}）</h3>
+        {matchedNodes.length === 0 ? (
+          <p className="mt-3 text-[13px] text-slate-400">本次未对齐到核心节点，将作为新增扩展进入审核。</p>
+        ) : (
+          <div className="mt-4 space-y-4">
+            {matchedNodes.map(({ node, score }) => (
+              <div
+                key={node.id}
+                className="grid items-center gap-4 rounded-xl bg-white px-4 py-3 shadow-[0_8px_26px_rgba(30,58,138,0.035)] md:grid-cols-[1fr_200px_90px]"
+              >
+                <div className="flex items-center gap-4">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-50 text-brand">
+                    <Icon name="git-merge" className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <div className="text-[15px] font-black text-[#172452]">{node.node_name}</div>
+                    <div className="mt-1 text-[12px] font-semibold text-slate-400">
+                      {node.node_category || "未分类"} · {node.version}
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <div className="mb-2 text-[12px] font-bold text-[#172452]">匹配度 {pct(score)}%</div>
+                  <div className="h-1.5 rounded-full bg-slate-100">
+                    <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct(score)}%` }} />
+                  </div>
+                </div>
+                <span className="justify-self-start rounded-full bg-emerald-50 px-3 py-1 text-[12px] font-bold text-emerald-600">
+                  {score >= 0.7 ? "强相关" : "相关"}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 提取的增量条目 */}
+        <h3 className="mt-7 text-[15px] font-black text-ink">提取的增量内容（{items.length}）</h3>
+        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+          {items.map((it) => {
+            const st = reviewStatusTone[it.review_status] ?? {
+              label: it.review_status,
+              tone: "bg-slate-100 text-slate-500",
+            };
+            return (
+              <div key={it.id} className="rounded-2xl bg-[#f8faff] px-5 py-4">
+                <div className="flex items-center gap-2">
+                  <span className="rounded-md bg-[#f0edff] px-2 py-0.5 text-[11px] font-bold text-brand">
+                    {extensionTypeLabel(it.extension_type)}
+                  </span>
+                  <span className={cn("rounded-md px-2 py-0.5 text-[11px] font-bold", st.tone)}>{st.label}</span>
+                </div>
+                <h4 className="mt-2 text-[14px] font-black text-[#172452]">{it.title}</h4>
+                {it.summary && (
+                  <p className="mt-1.5 text-[12.5px] font-medium leading-6 text-[#405070]">{it.summary}</p>
+                )}
+                {it.key_points.length > 0 && (
+                  <ul className="mt-2 space-y-1.5 text-[12px] font-medium leading-5 text-[#405070]">
+                    {it.key_points.map((kp, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand" />
+                        {kp}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
         </div>
-        <MergeSuggestion />
+
+        <div className="mt-6 rounded-2xl bg-[#fbfcff] px-5 py-5">
+          <h3 className="text-[15px] font-black text-ink">下一步</h3>
+          <p className="mt-2 text-[13px] font-medium leading-6 text-[#405070]">
+            以上增量内容已生成 {absorb.review_task_count} 个审核任务，等待人工审核。审核通过后可触发对齐节点的版本演进。
+          </p>
+          <div className="mt-4 flex justify-end">
+            <a
+              href="/review"
+              className="brand-gradient flex h-10 w-[190px] items-center justify-center gap-2 rounded-lg text-[13px] font-bold text-white shadow-soft"
+            >
+              <Icon name="send" className="h-4 w-4" />
+              前往人工审核
+            </a>
+          </div>
+        </div>
       </div>
     </Card>
   );
 }
 
-function MatchedNode({ node }: { node: (typeof matchedNodes)[number] }) {
-  return (
-    <div className="grid items-center gap-4 rounded-xl bg-white px-4 py-3 shadow-[0_8px_26px_rgba(30,58,138,0.035)] md:grid-cols-[1fr_170px_90px_108px]">
-      <div className="flex items-center gap-4">
-        <span className={cn("flex h-11 w-11 items-center justify-center rounded-xl", node.tone)}>
-          <Icon name={node.icon} className="h-5 w-5" />
-        </span>
-        <div>
-          <div className="text-[15px] font-black text-[#172452]">{node.title}</div>
-          <div className="mt-1 text-[12px] font-semibold text-slate-400">{node.sub}</div>
-        </div>
-      </div>
-      <div>
-        <div className="mb-2 text-[12px] font-bold text-[#172452]">匹配度 {node.rate}</div>
-        <div className="h-1.5 rounded-full bg-slate-100">
-          <div className="h-full rounded-full bg-emerald-500" style={{ width: node.width }} />
-        </div>
-      </div>
-      <span className="justify-self-start rounded-full bg-emerald-50 px-3 py-1 text-[12px] font-bold text-emerald-600">{node.tag}</span>
-      <button className="h-9 rounded-lg border border-line bg-white text-[12px] font-bold text-brand">查看详情</button>
-    </div>
-  );
-}
+function NoteAside() {
+  const [sources, setSources] = useState<ExpansionSource[]>([]);
+  const [loading, setLoading] = useState(true);
 
-function InsightCard({ card }: { card: (typeof insightCards)[number] }) {
-  return (
-    <div className="rounded-2xl bg-[#f8faff] px-5 py-5">
-      <h3 className="text-[15px] font-black text-ink">{card.title}</h3>
-      <ul className="mt-4 space-y-3 text-[12px] font-semibold leading-6 text-[#405070]">
-        {card.body.map((item) => (
-          <li key={item} className="flex gap-2">
-            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
-            {item}
-          </li>
-        ))}
-      </ul>
-      <button className="mt-4 flex items-center gap-1 text-[12px] font-bold text-brand">
-        查看更多
-        <Icon name="chevron-right" className="h-3.5 w-3.5" />
-      </button>
-    </div>
-  );
-}
+  useEffect(() => {
+    let cancelled = false;
+    expansionApi
+      .sources()
+      .then((d) => !cancelled && setSources(d.slice(0, 8)))
+      .catch(() => !cancelled && setSources([]))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-function MergeSuggestion() {
-  return (
-    <div className="mt-6 rounded-2xl bg-[#fbfcff] px-5 py-5">
-      <h3 className="text-[15px] font-black text-ink">建议合并内容</h3>
-      <p className="mt-3 text-[13px] font-semibold leading-6 text-[#405070]">
-        建议将以上增量内容合并到“价值主张”与“最小可行验证”节点中，作为同学增量扩展观点与案例，进入人工审核提醒。
-      </p>
-      <div className="mt-4 flex flex-wrap gap-3">
-        <span className="rounded-lg bg-[#f0edff] px-3 py-2 text-[12px] font-bold text-brand">价值主张：新增观点 1 条，案例 1 个，应用场景 1 条</span>
-        <span className="rounded-lg bg-orange-50 px-3 py-2 text-[12px] font-bold text-orange-500">最小可行验证：新增观点 1 条，案例 1 个</span>
-      </div>
-      <div className="mt-6 flex justify-end gap-4">
-        <button className="flex h-10 w-[170px] items-center justify-center gap-2 rounded-lg border border-line bg-white text-[13px] font-bold text-[#172452]">
-          <Icon name="file-text" className="h-4 w-4" />
-          保存为草稿
-        </button>
-        <button className="flex h-10 w-[170px] items-center justify-center gap-2 rounded-lg border border-line bg-white text-[13px] font-bold text-[#172452]">
-          <Icon name="refresh" className="h-4 w-4" />
-          调整匹配
-        </button>
-        <button className="brand-gradient flex h-10 w-[190px] items-center justify-center gap-2 rounded-lg text-[13px] font-bold text-white shadow-soft">
-          <Icon name="send" className="h-4 w-4" />
-          提交人工审核
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function NoteAssistant() {
   return (
     <aside className="flex h-screen w-[336px] shrink-0 flex-col gap-5 overflow-y-auto border-l border-line/70 bg-white/50 px-4 py-6 backdrop-blur-xl">
       <Card className="px-5 py-5">
@@ -326,55 +479,40 @@ function NoteAssistant() {
             <Icon name="boxes" className="h-5 w-5 text-white" />
           </div>
           <div>
-            <div className="text-[15px] font-bold text-ink">IMC&IPM 智能助手</div>
+            <div className="text-[15px] font-bold text-ink">笔记进化助手</div>
             <div className="text-[11px] text-slate-400">基于课程方法论的进化助手</div>
           </div>
           <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet">AI</span>
-          <button className="ml-auto text-slate-400"><Icon name="x" className="h-4 w-4" /></button>
         </div>
-        <div className="mt-6 rounded-xl bg-white p-4 shadow-[0_8px_26px_rgba(30,58,138,0.06)]">
-          <p className="text-[13px] font-bold text-ink">👋 你好，张晓明 👋</p>
-          <p className="mt-3 text-[13px] font-semibold leading-6 text-[#172452]">我可以帮你分析同学笔记，并提出进化建议：</p>
-          <ul className="mt-3 space-y-2 text-[12px] font-semibold leading-6 text-slate-600">
-            <li>识别核心观点与增量信息</li>
-            <li>匹配最相关的知识节点</li>
-            <li>提取案例与应用场景</li>
-            <li>判断与老师观点的关系</li>
-            <li>生成结构化进化建议</li>
-          </ul>
-        </div>
-        <p className="mt-5 text-[13px] font-bold text-[#172452]">你可以尝试问我：</p>
-        <div className="mt-3 space-y-2">
-          {prompts.map((prompt) => (
-            <button key={prompt} className="flex w-full items-center rounded-lg bg-[#f3f1ff] px-4 py-3 text-left text-[13px] font-bold text-brand">
-              {prompt}
-            </button>
+        <p className="mt-4 text-[13px] font-semibold leading-6 text-[#172452]">提交笔记后，系统将：</p>
+        <ul className="mt-3 space-y-2 text-[12px] font-semibold leading-6 text-slate-600">
+          {["切块并向量化笔记内容", "对齐最相关的核心知识节点", "提取观点/案例/场景等增量条目", "自动生成人工审核任务"].map((t) => (
+            <li key={t} className="flex gap-2">
+              <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
+              {t}
+            </li>
           ))}
-        </div>
-        <div className="mt-6 flex h-20 items-center gap-2 rounded-xl bg-white px-3 shadow-[0_8px_26px_rgba(30,58,138,0.045)]">
-          <input className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-slate-400" placeholder="继续提问..." />
-          <button className="brand-gradient flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-soft">
-            <Icon name="send" className="h-4 w-4" />
-          </button>
-        </div>
-        <p className="mt-3 text-[11px] text-slate-400">Shift + Enter 换行，Enter 发送</p>
+        </ul>
       </Card>
+
       <Card className="px-5 py-5">
         <div className="flex items-center justify-between">
-          <h2 className="text-[17px] font-black text-ink">最近处理记录</h2>
-          <button className="flex items-center gap-1 text-[12px] font-bold text-brand">
-            查看全部
-            <Icon name="chevron-right" className="h-3.5 w-3.5" />
-          </button>
+          <h2 className="text-[15px] font-black text-ink">最近处理记录</h2>
         </div>
-        <div className="mt-5 space-y-5">
-          {history.map((item) => (
-            <div key={item.title} className="flex items-start gap-3">
+        <div className="mt-5 space-y-4">
+          {loading && <p className="text-[12px] text-slate-400">加载中…</p>}
+          {!loading && sources.length === 0 && (
+            <p className="text-[12px] text-slate-400">暂无记录</p>
+          )}
+          {sources.map((s) => (
+            <div key={s.id} className="flex items-start gap-3">
               <div className="min-w-0">
-                <div className="truncate text-[13px] font-black text-[#172452]">{item.title}</div>
-                <div className="mt-1 text-[12px] text-slate-500">{item.meta}</div>
+                <div className="truncate text-[13px] font-black text-[#172452]">{s.title}</div>
+                <div className="mt-1 text-[12px] text-slate-500">{s.submitted_by || "—"}</div>
               </div>
-              <span className={cn("ml-auto shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold", item.tone)}>{item.status}</span>
+              <span className="ml-auto shrink-0 rounded-full bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-500">
+                {s.status}
+              </span>
             </div>
           ))}
         </div>
