@@ -334,6 +334,29 @@ export interface NodeExpansion {
   created_at: string;
 }
 
+export interface MethodologyGraphNode {
+  id: string;
+  node_name: string;
+  node_category: string | null;
+  degree: number;
+}
+
+export interface MethodologyGraphEdge {
+  source: string;
+  target: string;
+  relation_type: string;
+}
+
+export interface MethodologyGraph {
+  nodes: MethodologyGraphNode[];
+  edges: MethodologyGraphEdge[];
+  total_nodes: number;
+  total_edges: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+}
+
 export const nodesApi = {
   list: (params: { category?: string; q?: string; page?: number; pageSize?: number } = {}) => {
     const qs = new URLSearchParams();
@@ -351,6 +374,8 @@ export const nodesApi = {
     api.get<NodeVersion[]>(`/api/methodology/nodes/${id}/versions`),
   expansions: (id: string) =>
     api.get<NodeExpansion[]>(`/api/methodology/nodes/${id}/expansions`),
+  graph: (limit = 40, offset = 0) =>
+    api.get<MethodologyGraph>(`/api/methodology/graph?limit=${limit}&offset=${offset}`),
 };
 
 // ---- 扩展条目 / 人工审核（外部信息进化）----

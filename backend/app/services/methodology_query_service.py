@@ -117,9 +117,23 @@ class MethodologyQueryService:
 
     # --------------------------- 子资源 ---------------------------- #
 
-    def graph(self, limit: int = 40) -> MethodologyGraphOut:
-        """取连接度最高的 top-N 节点及其内部边，作为首页图谱预览子图。"""
-        total_nodes = self.db.query(func.count(MethodologyNode.id)).scalar() or 0
+    def graph(self, limit: int = 40, offset: int = 0) -> MethodologyGraphOut:
+        """按连接度分页返回真实知识图谱节点和关系边。
+
+        - 首页预览使用 offset=0, limit=40。
+        - 完整图谱页每次增加 offset，按 40 个节点一批加载。
+        - 边返回规则：当前批次节点与“已加载范围(0..offset+limit)”内节点之间的边，
+          前端逐批 merge 后即可逐步补全关系网络。
+        """
+        limit = max(1, min(limit, 100))
+        offset = max(0, offset)
+
+        total_nodes = (
+            self.db.query(func.count(MethodologyNode.id))
+            .filter(MethodologyNode.status == "active")
+            .scalar()
+            or 0
+        )
         total_edges = self.db.query(func.count(MethodologyEdge.id)).scalar() or 0
 
         # 全库各节点连接度（source + target）
@@ -137,17 +151,29 @@ class MethodologyQueryService:
         ):
             degree[nid] = degree.get(nid, 0) + c
 
-        top_ids = [nid for nid, _ in sorted(degree.items(), key=lambda x: -x[1])[:limit]]
-        if not top_ids:
-            return MethodologyGraphOut(
-                nodes=[], edges=[], total_nodes=total_nodes, total_edges=total_edges
-            )
-
-        node_rows = (
+        all_nodes = (
             self.db.query(MethodologyNode)
-            .filter(MethodologyNode.id.in_(top_ids))
+            .filter(MethodologyNode.status == "active")
             .all()
         )
+        ordered_nodes = sorted(
+            all_nodes,
+            key=lambda n: (-(degree.get(n.id, 0)), n.node_category or "", n.node_name),
+        )
+        loaded_nodes = ordered_nodes[: offset + limit]
+        page_nodes = ordered_nodes[offset : offset + limit]
+
+        if not page_nodes:
+            return MethodologyGraphOut(
+                nodes=[],
+                edges=[],
+                total_nodes=total_nodes,
+                total_edges=total_edges,
+                limit=limit,
+                offset=offset,
+                has_more=False,
+            )
+
         nodes = [
             GraphNode(
                 id=n.id,
@@ -155,15 +181,16 @@ class MethodologyQueryService:
                 node_category=n.node_category,
                 degree=degree.get(n.id, 0),
             )
-            for n in node_rows
+            for n in page_nodes
         ]
 
-        top_set = set(top_ids)
+        loaded_set = {n.id for n in loaded_nodes}
+        page_set = {n.id for n in page_nodes}
         edge_rows = (
             self.db.query(MethodologyEdge)
             .filter(
-                MethodologyEdge.source_node_id.in_(top_ids),
-                MethodologyEdge.target_node_id.in_(top_ids),
+                MethodologyEdge.source_node_id.in_(loaded_set),
+                MethodologyEdge.target_node_id.in_(loaded_set),
             )
             .all()
         )
@@ -174,10 +201,16 @@ class MethodologyQueryService:
                 relation_type=e.relation_type,
             )
             for e in edge_rows
-            if e.source_node_id in top_set and e.target_node_id in top_set
+            if e.source_node_id in page_set or e.target_node_id in page_set
         ]
         return MethodologyGraphOut(
-            nodes=nodes, edges=edges, total_nodes=total_nodes, total_edges=total_edges
+            nodes=nodes,
+            edges=edges,
+            total_nodes=total_nodes,
+            total_edges=total_edges,
+            limit=limit,
+            offset=offset,
+            has_more=offset + limit < total_nodes,
         )
 
     def node_edges(self, node_id: str) -> list[NodeEdgeOut]:

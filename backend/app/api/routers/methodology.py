@@ -21,6 +21,7 @@ from app.db.session import get_db
 from app.graphs.methodology_kernel_graph import MethodologyKernelBuildGraph
 from app.schemas.methodology import (
     GenerateRoutingRulesResult,
+    MethodologyGraphOut,
     MethodologyEdgeOut,
     MethodologyNodeOut,
     MethodologySourceOut,
@@ -188,6 +189,16 @@ def list_node_categories(
     top: int = 8, db: Session = Depends(get_db)
 ) -> list[NodeCategoryCount]:
     return MethodologyQueryService(db).categories(top=top)
+
+
+@router.get("/graph", response_model=MethodologyGraphOut)
+def get_methodology_graph(
+    limit: int = 40,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+) -> MethodologyGraphOut:
+    """知识网络图谱：从真实节点/边表按连接度分页抽取子图。"""
+    return MethodologyQueryService(db).graph(limit=limit, offset=offset)
 
 
 @router.get("/nodes/{node_id}", response_model=MethodologyNodeOut)

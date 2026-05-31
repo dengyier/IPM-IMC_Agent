@@ -163,6 +163,9 @@ class MethodologyGraphOut(BaseModel):
     edges: list[GraphEdge]
     total_nodes: int = 0  # 全库节点总数（供「查看完整图谱」上下文）
     total_edges: int = 0
+    limit: int = 40
+    offset: int = 0
+    has_more: bool = False
 
 
 class NodeEdgeOut(BaseModel):
