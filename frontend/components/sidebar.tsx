@@ -1,8 +1,36 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { Icon } from "./icon";
 import { cn } from "@/lib/utils";
 import { navItems } from "@/lib/data";
+import { dashboardApi, type DashboardSummary } from "@/lib/api";
+import { fmtNum } from "@/lib/presentation";
 
 export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    dashboardApi
+      .summary()
+      .then((data) => {
+        if (!cancelled) {
+          setSummary(data);
+          setError(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const sourceTotal = summary ? summary.methodology_sources + summary.expansion_sources : null;
+
   return (
     <aside className="flex h-screen w-[212px] shrink-0 flex-col border-r border-line bg-white/92 shadow-[10px_0_38px_rgba(30,58,138,0.035)] backdrop-blur-xl">
       {/* Logo */}
@@ -42,9 +70,9 @@ export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
           每一次学习都会沉淀为可复用的知识资产
         </p>
         <div className="mt-4 space-y-3">
-          <AssetStat label="知识节点总数" value="12,586" unit="个" />
-          <AssetStat label="资料总数" value="36,589" unit="份" />
-          <AssetStat label="诊断报告总数" value="1,248" unit="份" />
+          <AssetStat label="知识节点总数" value={error ? "—" : summary ? fmtNum(summary.nodes) : "··"} unit="个" />
+          <AssetStat label="资料总数" value={error ? "—" : sourceTotal !== null ? fmtNum(sourceTotal) : "··"} unit="份" />
+          <AssetStat label="诊断报告总数" value={error ? "—" : summary ? fmtNum(summary.reports) : "··"} unit="份" />
         </div>
         <div className="mt-2 flex justify-center pb-1 pt-1">
           <div className="isometric-blocks">
