@@ -107,14 +107,14 @@ export const recentReports: ReportRow[] = [
 ];
 
 export const quickActions = [
-  { icon: "folder", label: "资料中心" },
-  { icon: "list-tree", label: "知识节点库" },
-  { icon: "layout-grid", label: "商业画布诊断" },
-  { icon: "git-branch", label: "同学笔记进化" },
-  { icon: "users", label: "人工审核台" },
-  { icon: "file-bar-chart", label: "诊断报告中心" },
-  { icon: "file-plus", label: "新建报告" },
-  { icon: "gauge", label: "数据看板" },
+  { icon: "folder", label: "资料中心", href: "/data-center" },
+  { icon: "list-tree", label: "知识节点库", href: "/knowledge-nodes" },
+  { icon: "layout-grid", label: "商业画布诊断", href: "/canvas-diagnosis" },
+  { icon: "git-branch", label: "同学笔记进化", href: "/note-evolution" },
+  { icon: "users", label: "人工审核台", href: "/review" },
+  { icon: "file-bar-chart", label: "诊断报告中心", href: "/reports" },
+  { icon: "file-plus", label: "新建报告", href: "/canvas-diagnosis" },
+  { icon: "gauge", label: "数据看板", href: "/data-dashboard" },
 ];
 
 export const assistantSkills = [
@@ -130,33 +130,6 @@ export const assistantPrompts = [
   { icon: "target", label: "价值主张是否匹配客户需求？" },
   { icon: "swords", label: "帮我分析下竞争对手的优势" },
   { icon: "file-text", label: "生成一份商业画布报告" },
-];
-
-export interface TaskRow {
-  icon: string;
-  label: string;
-  time: string;
-  dot: string;
-}
-
-export const todoTasks: TaskRow[] = [
-  { icon: "file-text", label: "同学笔记待审核", time: "10 分钟前", dot: "bg-rose-500" },
-  { icon: "git-merge", label: "新增节点关系确认", time: "1 小时前", dot: "bg-orange-400" },
-  { icon: "clipboard-check", label: "诊断报告复核", time: "2 小时前", dot: "bg-orange-400" },
-  { icon: "folder-plus", label: "资料补充完善", time: "3 小时前", dot: "bg-blue-500" },
-];
-
-export interface VisitRow {
-  icon: string;
-  label: string;
-  time: string;
-}
-
-export const recentVisits: VisitRow[] = [
-  { icon: "file-bar-chart", label: "智能硬件产品可行性诊断报告", time: "刚刚" },
-  { icon: "list-tree", label: "知识节点库 – 价值主张", time: "10 分钟前" },
-  { icon: "git-branch", label: "同学笔记进化 – 笔记分析", time: "1 小时前" },
-  { icon: "folder", label: "资料中心 – 市场调研", time: "昨天 16:30" },
 ];
 
 export const navItems = [

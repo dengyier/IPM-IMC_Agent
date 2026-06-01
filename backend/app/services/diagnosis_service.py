@@ -27,9 +27,16 @@ MODULE_LABELS = {
 }
 
 DIAGNOSIS_SYSTEM = (
-    "你是基于港大 IMC&IPM 核心方法论的商业决策诊断专家。请基于提供的方法论判断要点与"
-    "用户画布，输出结构化诊断。要求：回到商业本质、点出关键假设与风险、给出可验证的下一步；"
-    "绝不照搬或泄露方法论原始课件文本；只输出 JSON 对象。"
+    "你是香港大学 IMC&IPM（整合营销传播 & 整合项目管理）核心方法论的资深商业决策诊断顾问。\n"
+    "你的任务：基于提供的『方法论判断要点』和用户的『商业模式画布』，产出一份**深入、具体、可落地**的诊断报告。\n\n"
+    "诊断原则：\n"
+    "1. 回到商业本质——先判断客户与价值主张是否成立，再看模式能否闭环、能否规模化。\n"
+    "2. 每一处判断都要『有据可依』：在分析中明确点名你援引了哪条方法论（如「依据『价值主张画布』…」），"
+    "并把方法论的关键问题转化为对该项目的具体追问。\n"
+    "3. 区分『事实 / 假设 / 风险』：清楚指出哪些是用户已陈述的事实，哪些是尚未验证的关键假设。\n"
+    "4. 建议必须可执行、可验证、有先后次序，构成一条『最小验证路径』。\n"
+    "5. 语言专业、具体、就事论事，避免空话套话；结合本项目的行业与细节展开。\n\n"
+    "硬性约束：绝不照搬或泄露方法论原始课件文本（只用消化后的判断要点）；严格只输出一个 JSON 对象，不要任何额外文字。"
 )
 
 
@@ -61,32 +68,59 @@ class DiagnosisService:
     ) -> dict | None:
         if not self.llm or not self.llm.available:
             return None
-        # 只传消化后的方法论判断要点，绝不传核心切块原文
+        # 只传消化后的方法论判断要点，绝不传核心切块原文（扩大节点数与字段，给 LLM 更厚的依据）
         method_points = [
             {
                 "node": n.node_name,
+                "category": getattr(n, "node_category", None),
+                "definition": n.definition,
                 "principle": n.core_principle,
                 "thinking": n.core_thinking,
                 "decision_logic": n.decision_logic,
                 "key_questions": n.key_questions,
+                "applicable_scenarios": n.applicable_scenarios,
             }
-            for n in context.nodes[:8]
+            for n in context.nodes[:12]
         ]
         expansions = [
             {"type": e.extension_type, "title": e.title, "summary": e.summary}
-            for e in (context.approved_expansions + context.cases)[:6]
+            for e in (context.approved_expansions + context.cases)[:8]
         ]
+        # 画布按中文标签呈现，便于 LLM 对齐
+        canvas_cn = {
+            MODULE_LABELS.get(m, m): (request.canvas or {}).get(m, "").strip() or "（未填写）"
+            for m in CANVAS_MODULES
+        }
         user = (
-            f"商业问题：{request.question or '（未提供，按画布整体诊断）'}\n"
-            f"意图：{routing.intent}\n"
-            f"画布输入(JSON)：{request.canvas}\n"
-            f"方法论判断要点(JSON)：{method_points}\n"
-            f"已审核补充证据(JSON)：{expansions}\n\n"
-            "请输出 JSON，字段："
-            "module_findings(对象，键为画布模块英文名，值含 assessment/issues[]/suggestions[]), "
-            "key_assumptions[], risks[], recommended_actions[], overall_summary。"
+            f"# 项目\n标题：{request.title}\n"
+            f"主体：{request.company_name or '（未提供）'}\n"
+            f"重点关注的问题：{request.question or '（未提供，请按画布整体诊断）'}\n"
+            f"识别意图：{routing.intent}\n\n"
+            f"# 商业模式画布（用户填写，中文键）\n{canvas_cn}\n\n"
+            f"# 可援引的方法论判断要点（港大 IMC&IPM，共 {len(method_points)} 条，已消化）\n{method_points}\n\n"
+            f"# 已审核的补充证据 / 案例（可作为佐证，{len(expansions)} 条）\n{expansions}\n\n"
+            "# 输出要求（严格 JSON 对象）\n"
+            "{\n"
+            '  "overall_summary": "200~400字的总体诊断：商业本质判断、模式是否闭环、最值得关注的1~2个结论与优先级",\n'
+            '  "module_findings": {\n'
+            '     "<画布模块英文键>": {\n'
+            '        "assessment": "该模块的深入评估（80~150字）：是否成立、援引了哪条方法论、关键假设是否被验证",\n'
+            '        "issues": ["该模块具体、可指认的问题（结合项目细节，不要泛泛而谈）", "..."],\n'
+            '        "suggestions": ["可执行的改进建议（说明依据的方法论）", "..."]\n'
+            "     }\n"
+            "  },\n"
+            '  "key_assumptions": ["以『假设…，因为…，需验证…』句式列出4~6条最关键的待验证假设"],\n'
+            '  "risks": ["每条风险写明：风险点 + 潜在影响 +（高/中/低）严重度 + 缓解方向，4~6条"],\n'
+            '  "recommended_actions": ["按先后次序的最小验证路径，每条含：做什么 + 怎么验证 + 成功判据，4~6步"]\n'
+            "}\n\n"
+            "注意：module_findings 必须覆盖全部 9 个画布模块英文键"
+            "（customer_segments, value_propositions, channels, customer_relationships, "
+            "revenue_streams, key_resources, key_activities, key_partners, cost_structure）；"
+            "未填写的模块也要给出『为何重要 + 应补充什么』。内容务必结合本项目行业与具体描述展开。"
         )
-        data = self.llm.chat_json(DIAGNOSIS_SYSTEM, user)
+        data = self.llm.chat_json(
+            DIAGNOSIS_SYSTEM, user, temperature=0.35, max_tokens=8000
+        )
         if not data:
             return None
         return self._assemble(data, routing, context)

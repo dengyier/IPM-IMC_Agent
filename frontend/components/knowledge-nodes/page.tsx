@@ -3,41 +3,42 @@
 import { useEffect, useState } from "react";
 import { Card } from "@/components/card";
 import { Icon } from "@/components/icon";
+import { RightPanel } from "@/components/right-panel";
 import { cn } from "@/lib/utils";
-import { knowledgeAssistantPrompts, knowledgeHistory } from "@/lib/data";
 import {
   nodesApi,
   type NodeCard as NodeCardData,
   type NodeCategory,
+  type NodeDetail,
+  type NodeEdge,
+  type NodeExpansion,
+  type NodeFilterOptions,
+  type NodeVersion,
 } from "@/lib/api";
-import { fmtNum, nodeStatusTone } from "@/lib/presentation";
-
-const filters = ["节点状态：全部", "来源类型：全部", "适用场景：全部", "版本：全部"];
+import { fmtNum, nodeStatusTone, sourceTypeLabel } from "@/lib/presentation";
 
 const PAGE_SIZE = 20;
-
-const graphLinks = [
-  ["客户细分", "影响", "渠道通路"],
-  ["渠道通路", "关联", "价值主张"],
-  ["价值主张", "支撑", "客户关系"],
-  ["客户关系", "子项", "收入来源"],
-  ["核心资源", "合作", "关键活动"],
-  ["关键活动", "产生", "价值主张"],
-  ["价值主张", "合作", "重要伙伴"],
-  ["重要伙伴", "合作", "成本结构"],
-];
+const DEFAULT_FILTERS = {
+  status: "",
+  sourceType: "",
+  scenario: "",
+  version: "",
+};
 
 export function KnowledgeNodesPage() {
   const [category, setCategory] = useState("全部节点");
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [page, setPage] = useState(1);
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
 
   const [nodes, setNodes] = useState<NodeCardData[]>([]);
   const [total, setTotal] = useState(0);
   const [categories, setCategories] = useState<NodeCategory[]>([]);
+  const [filterOptions, setFilterOptions] = useState<NodeFilterOptions | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedNode, setSelectedNode] = useState<NodeCardData | null>(null);
 
   // 搜索框防抖
   useEffect(() => {
@@ -48,14 +49,19 @@ export function KnowledgeNodesPage() {
   // 切换分类 / 搜索时回到第一页
   useEffect(() => {
     setPage(1);
-  }, [category, debouncedQuery]);
+  }, [category, debouncedQuery, filters]);
 
-  // 分类 Tab 只需加载一次
+  // 分类 Tab 和筛选项来自真实数据。
   useEffect(() => {
-    nodesApi
-      .categories()
-      .then(setCategories)
-      .catch(() => setCategories([]));
+    Promise.all([nodesApi.categories(), nodesApi.filterOptions()])
+      .then(([cats, options]) => {
+        setCategories(cats);
+        setFilterOptions(options);
+      })
+      .catch(() => {
+        setCategories([]);
+        setFilterOptions(null);
+      });
   }, []);
 
   // 节点列表
@@ -67,6 +73,10 @@ export function KnowledgeNodesPage() {
       .list({
         category: category === "全部节点" ? undefined : category,
         q: debouncedQuery || undefined,
+        status: filters.status || undefined,
+        sourceType: filters.sourceType || undefined,
+        scenario: filters.scenario || undefined,
+        version: filters.version || undefined,
         page,
         pageSize: PAGE_SIZE,
       })
@@ -87,30 +97,46 @@ export function KnowledgeNodesPage() {
     return () => {
       cancelled = true;
     };
-  }, [category, debouncedQuery, page]);
+  }, [category, debouncedQuery, filters, page]);
 
   return (
     <main className="flex min-w-0 flex-1 overflow-hidden">
       <section className="flex min-w-0 flex-1 flex-col overflow-y-auto px-8 py-6">
         <KnowledgeHeader total={total} />
-        <KnowledgeSearch query={query} onQueryChange={setQuery} />
+        <KnowledgeSearch
+          query={query}
+          onQueryChange={setQuery}
+        />
         <CategoryTabs
           categories={categories}
           selected={category}
           onSelect={setCategory}
         />
-        <FilterRow />
+        <FilterRow
+          value={filters}
+          options={filterOptions}
+          onChange={setFilters}
+          onReset={() => setFilters(DEFAULT_FILTERS)}
+        />
         <NodeGrid
           nodes={nodes}
           total={total}
           page={page}
           loading={loading}
           error={error}
+          onNodeSelect={setSelectedNode}
           onPageChange={setPage}
         />
-        <KnowledgeGraphMini />
       </section>
-      <KnowledgeAssistant />
+      <aside className="flex h-screen shrink-0 border-l border-line/70 bg-white/30 px-4 py-6 backdrop-blur-xl">
+        <RightPanel />
+      </aside>
+      {selectedNode && (
+        <NodeDetailDrawer
+          node={selectedNode}
+          onClose={() => setSelectedNode(null)}
+        />
+      )}
     </main>
   );
 }
@@ -182,10 +208,6 @@ function KnowledgeSearch({
         <Icon name="filter" className="h-4 w-4" />
         高级筛选
       </button>
-      <button className="brand-gradient flex h-[58px] items-center gap-2 rounded-xl px-6 text-[14px] font-bold text-white shadow-soft">
-        <Icon name="plus" className="h-4 w-4" />
-        新建节点
-      </button>
     </div>
   );
 }
@@ -225,20 +247,59 @@ function CategoryTabs({
   );
 }
 
-function FilterRow() {
+function FilterRow({
+  value,
+  options,
+  onChange,
+  onReset,
+}: {
+  value: typeof DEFAULT_FILTERS;
+  options: NodeFilterOptions | null;
+  onChange: (value: typeof DEFAULT_FILTERS) => void;
+  onReset: () => void;
+}) {
+  const statusOptions =
+    options?.statuses.map((item) => ({
+      ...item,
+      label: nodeStatusTone[item.value]?.label ?? item.label,
+    })) ?? [];
+  const sourceOptions =
+    options?.source_types.map((item) => ({
+      ...item,
+      label: sourceTypeLabel(item.value),
+    })) ?? [];
+
   return (
     <Card className="mt-0 rounded-t-none px-5 py-4">
       <div className="flex items-center gap-4">
-        {filters.map((filter) => (
-          <button
-            key={filter}
-            className="flex h-10 min-w-[146px] items-center justify-between rounded-lg border border-line bg-white px-4 text-[13px] font-semibold text-[#172452]"
-          >
-            {filter}
-            <Icon name="chevron-down" className="h-3.5 w-3.5 text-slate-400" />
-          </button>
-        ))}
-        <button className="h-10 rounded-lg border border-line bg-white px-5 text-[13px] font-semibold text-slate-500">
+        <FilterSelect
+          label="节点状态"
+          value={value.status}
+          options={statusOptions}
+          onChange={(status) => onChange({ ...value, status })}
+        />
+        <FilterSelect
+          label="来源类型"
+          value={value.sourceType}
+          options={sourceOptions}
+          onChange={(sourceType) => onChange({ ...value, sourceType })}
+        />
+        <FilterSelect
+          label="适用场景"
+          value={value.scenario}
+          options={options?.scenarios ?? []}
+          onChange={(scenario) => onChange({ ...value, scenario })}
+        />
+        <FilterSelect
+          label="版本"
+          value={value.version}
+          options={options?.versions ?? []}
+          onChange={(version) => onChange({ ...value, version })}
+        />
+        <button
+          onClick={onReset}
+          className="h-10 rounded-lg border border-line bg-white px-5 text-[13px] font-semibold text-slate-500"
+        >
           重置
         </button>
         <div className="ml-auto flex gap-2">
@@ -254,12 +315,47 @@ function FilterRow() {
   );
 }
 
+function FilterSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: { label: string; value: string; count: number }[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="relative h-10 min-w-[146px]">
+      <span className="sr-only">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-10 w-full appearance-none rounded-lg border border-line bg-white px-4 pr-8 text-[13px] font-semibold text-[#172452] outline-none transition-colors hover:border-brand focus:border-brand"
+      >
+        <option value="">{label}：全部</option>
+        {options.map((option) => (
+          <option key={`${label}-${option.value}`} value={option.value}>
+            {option.label}（{option.count}）
+          </option>
+        ))}
+      </select>
+      <Icon
+        name="chevron-down"
+        className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+      />
+    </label>
+  );
+}
+
 function NodeGrid({
   nodes,
   total,
   page,
   loading,
   error,
+  onNodeSelect,
   onPageChange,
 }: {
   nodes: NodeCardData[];
@@ -267,6 +363,7 @@ function NodeGrid({
   page: number;
   loading: boolean;
   error: string | null;
+  onNodeSelect: (node: NodeCardData) => void;
   onPageChange: (p: number) => void;
 }) {
   return (
@@ -286,15 +383,8 @@ function NodeGrid({
       ) : (
         <div className={cn("grid gap-4 xl:grid-cols-3", loading && "opacity-60")}>
           {nodes.map((node) => (
-            <NodeCard key={node.id} node={node} />
+            <NodeCard key={node.id} node={node} onSelect={() => onNodeSelect(node)} />
           ))}
-          <button className="min-h-[88px] rounded-2xl border border-dashed border-[#d8dcf7] bg-[#f6f7ff] text-center text-brand transition-colors hover:border-brand hover:bg-white">
-            <div className="flex items-center justify-center gap-2 text-[15px] font-bold">
-              <Icon name="plus" className="h-5 w-5" />
-              新建知识节点
-            </div>
-            <p className="mt-1 text-[12px] text-slate-500">沉淀新的知识资产</p>
-          </button>
         </div>
       )}
       <Pagination total={total} page={page} onPageChange={onPageChange} />
@@ -302,13 +392,21 @@ function NodeGrid({
   );
 }
 
-function NodeCard({ node }: { node: NodeCardData }) {
+function NodeCard({ node, onSelect }: { node: NodeCardData; onSelect: () => void }) {
   const tone = nodeStatusTone[node.status] ?? {
     label: node.status,
     tone: "bg-slate-100 text-slate-500",
   };
+  const sourceLabel =
+    node.source_types.length > 0
+      ? node.source_types.map(sourceTypeLabel).join("、")
+      : "未知来源";
   return (
-    <article className="dashboard-card min-h-[178px] rounded-2xl p-5 transition-transform hover:-translate-y-0.5">
+    <button
+      type="button"
+      onClick={onSelect}
+      className="dashboard-card min-h-[178px] rounded-2xl p-5 text-left transition-all hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-[0_18px_42px_rgba(30,58,138,0.10)] focus:outline-none focus:ring-2 focus:ring-brand/25"
+    >
       <div className="flex items-start justify-between gap-3">
         <h2 className="text-[17px] font-black tracking-[-0.02em] text-[#172452]">
           {node.node_name}
@@ -333,7 +431,7 @@ function NodeCard({ node }: { node: NodeCardData }) {
       </div>
       <div className="mt-5 flex items-center border-t border-line pt-3 text-[12px] text-slate-500">
         <span className="truncate">
-          {node.node_category ? `分类：${node.node_category}` : "未分类"} · 源自 {node.source_chunk_count} 个片段
+          {node.node_category ? `分类：${node.node_category}` : "未分类"} · 来源：{sourceLabel} · {node.source_chunk_count} 个片段
         </span>
         {node.expansion_count > 0 && (
           <span className="ml-auto inline-flex items-center gap-1 text-brand">
@@ -342,8 +440,257 @@ function NodeCard({ node }: { node: NodeCardData }) {
           </span>
         )}
       </div>
-    </article>
+    </button>
   );
+}
+
+function NodeDetailDrawer({
+  node,
+  onClose,
+}: {
+  node: NodeCardData;
+  onClose: () => void;
+}) {
+  const [detail, setDetail] = useState<NodeDetail | null>(null);
+  const [edges, setEdges] = useState<NodeEdge[]>([]);
+  const [versions, setVersions] = useState<NodeVersion[]>([]);
+  const [expansions, setExpansions] = useState<NodeExpansion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    Promise.all([
+      nodesApi.detail(node.id),
+      nodesApi.edges(node.id),
+      nodesApi.versions(node.id),
+      nodesApi.expansions(node.id),
+    ])
+      .then(([detailData, edgeData, versionData, expansionData]) => {
+        if (cancelled) return;
+        setDetail(detailData);
+        setEdges(edgeData);
+        setVersions(versionData);
+        setExpansions(expansionData);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e.message || "加载节点详情失败");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [node.id]);
+
+  const tone = nodeStatusTone[(detail?.status || node.status)] ?? {
+    label: detail?.status || node.status,
+    tone: "bg-slate-100 text-slate-500",
+  };
+  const sourceLabel =
+    node.source_types.length > 0
+      ? node.source_types.map(sourceTypeLabel).join("、")
+      : "未知来源";
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      <button
+        type="button"
+        aria-label="关闭节点详情"
+        className="absolute inset-0 bg-[#0f172a]/20 backdrop-blur-[2px]"
+        onClick={onClose}
+      />
+      <aside className="relative flex h-full w-[520px] max-w-[92vw] flex-col border-l border-line bg-white shadow-[0_24px_80px_rgba(15,23,42,0.22)]">
+        <div className="border-b border-line px-6 py-5">
+          <div className="flex items-start gap-3">
+            <div className="brand-gradient flex h-10 w-10 shrink-0 items-center justify-center rounded-xl shadow-soft">
+              <Icon name="list-tree" className="h-5 w-5 text-white" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="truncate text-[20px] font-black tracking-[-0.02em] text-ink">
+                  {detail?.node_name || node.node_name}
+                </h2>
+                <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold", tone.tone)}>
+                  <Icon name="check-circle" className="h-3.5 w-3.5" />
+                  {tone.label}
+                </span>
+              </div>
+              <p className="mt-1 text-[12px] font-medium text-slate-500">
+                {detail?.node_category || node.node_category || "未分类"} · {detail?.version || node.version} · 来源：{sourceLabel}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-50 hover:text-ink"
+            >
+              <Icon name="x" className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          {loading ? (
+            <div className="rounded-2xl border border-line bg-slate-50 px-5 py-8 text-center text-[13px] text-slate-500">
+              正在加载节点详情…
+            </div>
+          ) : error ? (
+            <div className="rounded-2xl border border-rose-100 bg-rose-50 px-5 py-8 text-center text-[13px] text-rose-500">
+              {error}
+            </div>
+          ) : detail ? (
+            <div className="space-y-5">
+              <DetailSection title="节点定义">
+                <p className="text-[13px] leading-7 text-[#405070]">
+                  {detail.definition || "暂无定义"}
+                </p>
+              </DetailSection>
+
+              <DetailSection title="核心原则">
+                <p className="text-[13px] leading-7 text-[#405070]">
+                  {detail.core_principle || "暂无核心原则"}
+                </p>
+              </DetailSection>
+
+              <DetailSection title="思考路径">
+                <p className="whitespace-pre-line text-[13px] leading-7 text-[#405070]">
+                  {detail.core_thinking || "暂无思考路径"}
+                </p>
+              </DetailSection>
+
+              <DetailList title="决策逻辑" items={detail.decision_logic} />
+              <DetailList title="关键问题" items={detail.key_questions} />
+              <DetailList title="常见误区" items={detail.common_mistakes} />
+              <TagSection title="适用场景" items={detail.applicable_scenarios} />
+
+              <DetailSection title={`关联节点（${edges.length}）`}>
+                {edges.length === 0 ? (
+                  <EmptyLine>暂无关联节点</EmptyLine>
+                ) : (
+                  <div className="space-y-2">
+                    {edges.slice(0, 8).map((edge) => (
+                      <div key={edge.id} className="rounded-xl border border-line bg-white px-3 py-2.5">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-[13px] font-bold text-[#172452]">{edge.neighbor_name}</span>
+                          <span className="rounded-full bg-[#f0edff] px-2 py-0.5 text-[10px] font-bold text-brand">
+                            {edge.direction === "outgoing" ? "指向" : "来源"}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-[11px] text-slate-500">
+                          {edge.relation_type} · 权重 {edge.weight.toFixed(2)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </DetailSection>
+
+              <DetailSection title={`扩展条目（${expansions.length}）`}>
+                {expansions.length === 0 ? (
+                  <EmptyLine>暂无已对齐扩展条目</EmptyLine>
+                ) : (
+                  <div className="space-y-2">
+                    {expansions.slice(0, 5).map((item) => (
+                      <div key={item.id} className="rounded-xl border border-line bg-white px-3 py-2.5">
+                        <div className="text-[13px] font-bold text-[#172452]">{item.title || item.extension_type}</div>
+                        <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-slate-500">
+                          {item.summary || "暂无摘要"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </DetailSection>
+
+              <DetailSection title={`版本记录（${versions.length}）`}>
+                {versions.length === 0 ? (
+                  <EmptyLine>暂无版本演进记录</EmptyLine>
+                ) : (
+                  <div className="space-y-2">
+                    {versions.slice(0, 5).map((version) => (
+                      <div key={version.id} className="rounded-xl border border-line bg-white px-3 py-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[13px] font-bold text-[#172452]">{version.version}</span>
+                          <span className="text-[11px] text-slate-400">{formatDate(version.created_at)}</span>
+                        </div>
+                        <p className="mt-1 text-[12px] leading-5 text-slate-500">
+                          {version.change_summary || version.change_type}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </DetailSection>
+            </div>
+          ) : null}
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function DetailSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-2xl border border-line bg-[#fbfcff] px-4 py-4">
+      <h3 className="text-[14px] font-black text-ink">{title}</h3>
+      <div className="mt-3">{children}</div>
+    </section>
+  );
+}
+
+function DetailList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <DetailSection title={title}>
+      {items.length === 0 ? (
+        <EmptyLine>暂无内容</EmptyLine>
+      ) : (
+        <ul className="space-y-2">
+          {items.map((item) => (
+            <li key={item} className="flex gap-2 text-[13px] leading-6 text-[#405070]">
+              <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </DetailSection>
+  );
+}
+
+function TagSection({ title, items }: { title: string; items: string[] }) {
+  return (
+    <DetailSection title={title}>
+      {items.length === 0 ? (
+        <EmptyLine>暂无适用场景</EmptyLine>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {items.map((item) => (
+            <span key={item} className="rounded-lg bg-[#f0edff] px-2.5 py-1.5 text-[12px] font-bold text-brand">
+              {item}
+            </span>
+          ))}
+        </div>
+      )}
+    </DetailSection>
+  );
+}
+
+function EmptyLine({ children }: { children: React.ReactNode }) {
+  return <div className="text-[13px] text-slate-400">{children}</div>;
+}
+
+function formatDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
 }
 
 function Pagination({
@@ -426,152 +773,5 @@ function PageButton({
     >
       <Icon name={icon} className="h-4 w-4" />
     </button>
-  );
-}
-
-function KnowledgeGraphMini() {
-  return (
-    <Card className="mt-7 px-6 py-5">
-      <div className="flex items-center justify-between">
-        <h2 className="text-[15px] font-bold text-ink">知识图谱（局部视图：商业画布）</h2>
-        <button className="flex items-center gap-1 text-[12px] font-bold text-brand">
-          查看完整图谱
-          <Icon name="chevron-right" className="h-3.5 w-3.5" />
-        </button>
-      </div>
-      <div className="relative mt-5 h-[190px] overflow-hidden rounded-2xl bg-white">
-        <svg viewBox="0 0 820 190" className="h-full w-full">
-          <defs>
-            <filter id="softGlow" x="-80%" y="-80%" width="260%" height="260%">
-              <feGaussianBlur stdDeviation="7" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-          </defs>
-          {graphLinks.map(([from, label, to], index) => {
-            const left = graphLayout[from as keyof typeof graphLayout];
-            const right = graphLayout[to as keyof typeof graphLayout];
-            if (!left || !right) return null;
-            return (
-              <g key={`${from}-${to}`}>
-                <line x1={left.x} y1={left.y} x2={right.x} y2={right.y} stroke="#d9e1f4" strokeWidth="1.2" />
-                <text x={(left.x + right.x) / 2} y={(left.y + right.y) / 2 - 5} textAnchor="middle" fontSize="10" fill="#9aa5bd">
-                  {label}
-                </text>
-              </g>
-            );
-          })}
-          {Object.entries(graphLayout).map(([name, point]) => (
-            <g key={name}>
-              <rect
-                x={point.x - point.w / 2}
-                y={point.y - 17}
-                width={point.w}
-                height="34"
-                rx="17"
-                fill={name === "价值主张" ? "#5b4bff" : "#f0f3ff"}
-                filter={name === "价值主张" ? "url(#softGlow)" : undefined}
-              />
-              <text
-                x={point.x}
-                y={point.y + 4}
-                textAnchor="middle"
-                fontSize="13"
-                fontWeight="700"
-                fill={name === "价值主张" ? "#fff" : "#4f62d8"}
-              >
-                {name}
-              </text>
-            </g>
-          ))}
-        </svg>
-        <div className="absolute right-5 top-8 flex flex-col rounded-lg border border-line bg-white shadow-card">
-          <button className="flex h-8 w-8 items-center justify-center text-brand">+</button>
-          <button className="flex h-8 w-8 items-center justify-center border-t border-line text-slate-500">−</button>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-const graphLayout = {
-  客户细分: { x: 175, y: 45, w: 92 },
-  渠道通路: { x: 310, y: 45, w: 92 },
-  价值主张: { x: 420, y: 80, w: 104 },
-  客户关系: { x: 555, y: 45, w: 92 },
-  收入来源: { x: 680, y: 45, w: 92 },
-  核心资源: { x: 145, y: 135, w: 92 },
-  关键活动: { x: 285, y: 135, w: 92 },
-  重要伙伴: { x: 520, y: 135, w: 92 },
-  成本结构: { x: 665, y: 135, w: 92 },
-};
-
-function KnowledgeAssistant() {
-  return (
-    <aside className="flex h-screen w-[336px] shrink-0 flex-col gap-5 overflow-y-auto border-l border-line/70 bg-white/50 px-4 py-6 backdrop-blur-xl">
-      <Card className="px-5 py-5">
-        <div className="flex items-center gap-2.5">
-          <div className="brand-gradient flex h-9 w-9 items-center justify-center rounded-xl shadow-soft">
-            <Icon name="boxes" className="h-5 w-5 text-white" />
-          </div>
-          <div>
-            <div className="text-[15px] font-bold text-ink">IMC&IPM 智能助手</div>
-            <div className="text-[11px] text-slate-400">基于学院方法论的决策助手</div>
-          </div>
-          <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet">AI</span>
-          <button className="ml-auto text-slate-400"><Icon name="x" className="h-4 w-4" /></button>
-        </div>
-        <div className="mt-6 rounded-xl bg-white p-4 shadow-[0_8px_26px_rgba(30,58,138,0.06)]">
-          <p className="text-[13px] font-bold text-ink">👋 你好，张晓明</p>
-          <p className="mt-3 text-[12px] font-semibold text-slate-600">关于知识节点库，我可以帮助你：</p>
-          <ul className="mt-3 space-y-2 text-[12px] leading-6 text-slate-600">
-            <li>• 快速查找相关知识节点</li>
-            <li>• 分析节点之间的关联关系</li>
-            <li>• 搜寻相关的课程资料和案例</li>
-            <li>• 发现和归纳笔记中的空白点</li>
-            <li>• 评估节点的完整性和质量</li>
-          </ul>
-        </div>
-        <div className="mt-4 space-y-2">
-          {knowledgeAssistantPrompts.map((prompt) => (
-            <button
-              key={prompt}
-              className="flex w-full items-center rounded-lg bg-[#f3f1ff] px-3 py-3 text-left text-[12.5px] font-semibold leading-5 text-brand"
-            >
-              {prompt}
-            </button>
-          ))}
-        </div>
-      </Card>
-      <Card className="px-5 py-5">
-        <div className="flex items-center justify-between">
-          <h2 className="text-[15px] font-bold text-ink">对话历史</h2>
-          <Icon name="chevron-down" className="h-4 w-4 text-slate-400" />
-        </div>
-        <p className="mt-5 text-[12px] font-semibold text-slate-400">今天</p>
-        <div className="mt-3 space-y-3">
-          {knowledgeHistory.map((item) => (
-            <div key={item.label} className="rounded-xl bg-white px-4 py-3 shadow-[0_8px_26px_rgba(30,58,138,0.045)]">
-              <div className="text-[12.5px] text-slate-700">{item.label}</div>
-              <div className="mt-1 text-right text-[11px] text-slate-400">{item.time}</div>
-            </div>
-          ))}
-        </div>
-      </Card>
-      <Card className="mt-auto px-4 py-4">
-        <div className="flex h-16 items-center gap-2 rounded-xl bg-white px-3">
-          <input
-            className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-slate-400"
-            placeholder="继续提问..."
-          />
-          <button className="brand-gradient flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-soft">
-            <Icon name="send" className="h-4 w-4" />
-          </button>
-        </div>
-        <p className="mt-3 text-center text-[11px] text-slate-400">内容由 AI 生成，仅供参考</p>
-      </Card>
-    </aside>
   );
 }

@@ -9,15 +9,9 @@ import {
   DiagnoseResult,
   DiagnosisReport,
   pollTask,
-  QualityCheck,
   reportsApi,
 } from "@/lib/api";
-import {
-  dimensionLabels,
-  moduleLabel,
-  reportStatusTone,
-  scoreBand,
-} from "@/lib/presentation";
+import { moduleLabel, reportStatusTone } from "@/lib/presentation";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 8;
@@ -39,7 +33,7 @@ type ModuleFinding = {
   suggestions?: string[];
 };
 
-export function ReportsPage() {
+export function ReportsPage({ initialReportId = null }: { initialReportId?: string | null }) {
   const [reports, setReports] = useState<DiagnosisReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
@@ -47,13 +41,16 @@ export function ReportsPage() {
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  async function loadList(keepSelection = true) {
+  async function loadList(keepSelection = true, preferredReportId: string | null = null) {
     setLoading(true);
     setListError(null);
     try {
       const data = await reportsApi.list();
       setReports(data);
       setSelectedId((prev) => {
+        if (preferredReportId && data.some((r) => r.id === preferredReportId)) {
+          return preferredReportId;
+        }
         if (keepSelection && prev && data.some((r) => r.id === prev)) return prev;
         return data[0]?.id ?? null;
       });
@@ -65,9 +62,9 @@ export function ReportsPage() {
   }
 
   useEffect(() => {
-    loadList(false);
+    loadList(false, initialReportId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [initialReportId]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -112,7 +109,7 @@ export function ReportsPage() {
             <ReportDetail
               reportId={selectedId}
               onDeleted={() => loadList(false)}
-              onRegenerated={() => loadList(false)}
+              onRegenerated={(newReportId) => loadList(false, newReportId)}
             />
           </div>
         </section>
@@ -331,10 +328,9 @@ function ReportDetail({
 }: {
   reportId: string | null;
   onDeleted: () => void;
-  onRegenerated: () => void;
+  onRegenerated: (newReportId: string | null) => void;
 }) {
   const [report, setReport] = useState<DiagnosisReport | null>(null);
-  const [quality, setQuality] = useState<QualityCheck | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"" | "regenerate" | "delete">("");
@@ -343,7 +339,6 @@ function ReportDetail({
   useEffect(() => {
     if (!reportId) {
       setReport(null);
-      setQuality(null);
       return;
     }
     let cancelled = false;
@@ -355,13 +350,6 @@ function ReportDetail({
         const rep = await reportsApi.detail(reportId);
         if (cancelled) return;
         setReport(rep);
-        // 质检可能不存在（404）→ 容忍
-        try {
-          const q = await reportsApi.quality(reportId);
-          if (!cancelled) setQuality(q);
-        } catch {
-          if (!cancelled) setQuality(null);
-        }
       } catch (e) {
         if (!cancelled) setError(e instanceof ApiError ? e.message : "加载报告详情失败");
       } finally {
@@ -384,7 +372,7 @@ function ReportDetail({
       });
       const newId = task.result?.report?.id;
       setActionMsg(newId ? "已生成新报告，正在刷新列表…" : "已完成。");
-      onRegenerated();
+      onRegenerated(newId ?? null);
     } catch (e) {
       setActionMsg(e instanceof ApiError ? `重新生成失败：${e.message}` : "重新生成失败");
     } finally {
@@ -479,21 +467,18 @@ function ReportDetail({
       </div>
 
       <div className="flex-1 overflow-y-auto px-7 py-6">
-        {/* 报告摘要 + 评分 */}
-        <div className="grid gap-5 lg:grid-cols-[1fr_220px]">
-          <div>
-            <h3 className="text-[15px] font-black text-ink">报告摘要</h3>
-            <p className="mt-3 whitespace-pre-line text-[13px] font-medium leading-7 text-[#3b4a6b]">
-              {report.overall_summary || "暂无摘要。"}
+        {/* 报告摘要 */}
+        <div>
+          <h3 className="text-[15px] font-black text-ink">报告摘要</h3>
+          <p className="mt-3 whitespace-pre-line text-[13px] font-medium leading-7 text-[#3b4a6b]">
+            {report.overall_summary || "暂无摘要。"}
+          </p>
+          {report.question && (
+            <p className="mt-3 rounded-xl bg-[#f8faff] px-4 py-3 text-[12.5px] font-medium leading-6 text-slate-500">
+              <span className="font-bold text-[#172452]">诊断问题：</span>
+              {report.question}
             </p>
-            {report.question && (
-              <p className="mt-3 rounded-xl bg-[#f8faff] px-4 py-3 text-[12.5px] font-medium leading-6 text-slate-500">
-                <span className="font-bold text-[#172452]">诊断问题：</span>
-                {report.question}
-              </p>
-            )}
-          </div>
-          <ScoreCard score={pct(report.quality_score)} passed={quality?.passed} />
+          )}
         </div>
 
         {/* 商业画布诊断 */}
@@ -530,62 +515,6 @@ function ReportDetail({
           items={report.recommended_actions}
         />
 
-        {/* 质量自检 */}
-        {quality && (
-          <>
-            <h3 className="mt-7 text-[15px] font-black text-ink">
-              质量自检
-              <span
-                className={cn(
-                  "ml-2 rounded-md px-2 py-0.5 text-[11px] font-bold",
-                  quality.passed ? "bg-emerald-50 text-emerald-600" : "bg-orange-50 text-orange-500"
-                )}
-              >
-                {quality.passed ? "通过" : "未通过"} · {pct(quality.overall_score)}
-              </span>
-            </h3>
-            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-              {Object.entries(quality.dimension_scores).map(([k, v]) => (
-                <div key={k} className="rounded-2xl bg-[#f8faff] px-3 py-3 text-center">
-                  <div className="text-[20px] font-black tracking-[-0.02em] text-ink">{pct(v)}</div>
-                  <div className="mt-1 text-[11px] font-medium text-slate-400">
-                    {dimensionLabels[k] ?? k}
-                  </div>
-                </div>
-              ))}
-            </div>
-            {(quality.issues.length > 0 || quality.suggestions.length > 0) && (
-              <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                {quality.issues.length > 0 && (
-                  <div className="rounded-2xl bg-rose-50/60 px-4 py-3">
-                    <div className="text-[12px] font-bold text-rose-500">问题</div>
-                    <ul className="mt-2 space-y-1.5 text-[12px] font-medium leading-5 text-[#3b4a6b]">
-                      {quality.issues.map((i, idx) => (
-                        <li key={idx} className="flex gap-2">
-                          <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-rose-400" />
-                          {i}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {quality.suggestions.length > 0 && (
-                  <div className="rounded-2xl bg-emerald-50/60 px-4 py-3">
-                    <div className="text-[12px] font-bold text-emerald-600">改进建议</div>
-                    <ul className="mt-2 space-y-1.5 text-[12px] font-medium leading-5 text-[#3b4a6b]">
-                      {quality.suggestions.map((s, idx) => (
-                        <li key={idx} className="flex gap-2">
-                          <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-emerald-400" />
-                          {s}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )}
-          </>
-        )}
       </div>
     </Card>
   );
@@ -662,40 +591,5 @@ function ListSection({
         ))}
       </ul>
     </>
-  );
-}
-
-function ScoreCard({ score, passed }: { score: number; passed?: boolean }) {
-  const r = 46;
-  const c = 2 * Math.PI * r;
-  const offset = c * (1 - score / 100);
-  const band = scoreBand(score);
-  return (
-    <div className="flex flex-col items-center justify-center rounded-2xl bg-[#f8faff] py-5">
-      <div className="text-[13px] font-bold text-slate-500">综合评分</div>
-      <div className="relative mt-2 h-[120px] w-[120px]">
-        <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
-          <circle cx="60" cy="60" r={r} fill="none" stroke="#e9ecf6" strokeWidth="10" />
-          <circle
-            cx="60"
-            cy="60"
-            r={r}
-            fill="none"
-            stroke="#5B4BFF"
-            strokeWidth="10"
-            strokeLinecap="round"
-            strokeDasharray={c}
-            strokeDashoffset={offset}
-          />
-        </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-[34px] font-black leading-none text-ink">{score}</span>
-          <span className="mt-1 text-[12px] font-bold text-slate-400">/100</span>
-        </div>
-      </div>
-      <span className={cn("mt-3 rounded-full px-4 py-1 text-[12px] font-bold", band.tone)}>
-        {passed === false ? "未通过" : band.label}
-      </span>
-    </div>
   );
 }

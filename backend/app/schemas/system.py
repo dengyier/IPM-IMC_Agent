@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -65,3 +66,60 @@ class SettingsOut(BaseModel):
     embedding_model: str
     embedding_dim: int
     embedding_api_key_masked: str
+
+
+class EditableSystemSettings(BaseModel):
+    """Admin-editable settings shown in the basic settings tab."""
+
+    system_name: str
+    system_short_name: str
+    system_version: str
+    deployment_environment: str
+    deployed_at: str
+    timezone: str
+    company_name: str
+    company_short_name: str
+    company_website: str
+    language: str
+    date_format: str
+    time_format: str
+    number_format: str
+    currency: str
+    theme_mode: str
+    accent_color: str
+    nav_density: str
+    allow_registration: bool
+    require_2fa: bool
+    require_email_verification: bool
+    audit_log_enabled: bool
+    auto_backup_enabled: bool
+    backup_retention_days: int
+    updated_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class EditableSystemSettingsUpdate(BaseModel):
+    system_name: str | None = None
+    system_short_name: str | None = None
+    system_version: str | None = None
+    deployment_environment: str | None = None
+    deployed_at: str | None = None
+    timezone: str | None = None
+    company_name: str | None = None
+    company_short_name: str | None = None
+    company_website: str | None = None
+    language: str | None = None
+    date_format: str | None = None
+    time_format: str | None = None
+    number_format: str | None = None
+    currency: str | None = None
+    theme_mode: str | None = None
+    accent_color: str | None = None
+    nav_density: str | None = None
+    allow_registration: bool | None = None
+    require_2fa: bool | None = None
+    require_email_verification: bool | None = None
+    audit_log_enabled: bool | None = None
+    auto_backup_enabled: bool | None = None
+    backup_retention_days: int | None = None

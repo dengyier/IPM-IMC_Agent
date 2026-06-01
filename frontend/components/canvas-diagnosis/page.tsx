@@ -15,6 +15,7 @@ import {
 import {
   CANVAS_MODULE_ORDER,
   canvasModuleLabels,
+  dimensionLabels,
   moduleLabel,
 } from "@/lib/presentation";
 import { cn } from "@/lib/utils";
@@ -24,6 +25,7 @@ const STEPS = ["填写项目与画布", "提交诊断", "AI 分析", "生成报�
 const pct = (v: number) => Math.round((v ?? 0) * 100);
 
 type Phase = "idle" | "running" | "done" | "error";
+type EvidenceRefItem = { label: string; type?: string };
 
 // 9 宫格输入区每个模块的提示
 const MODULE_HINTS: Record<string, string> = {
@@ -47,11 +49,18 @@ export function CanvasDiagnosisPage() {
   const [progress, setProgress] = useState(0);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [result, setResult] = useState<DiagnoseResult | null>(null);
+  const [reportsRefreshKey, setReportsRefreshKey] = useState(0);
 
   const setModule = (k: string, v: string) => setCanvas((p) => ({ ...p, [k]: v }));
 
   const filledModules = CANVAS_MODULE_ORDER.filter((m) => (canvas[m] ?? "").trim()).length;
-  const canSubmit = title.trim().length > 0 && phase !== "running";
+  const hasDiagnosticInput = question.trim().length > 0 || filledModules > 0;
+  const missingSubmitReason = !title.trim()
+    ? "请先填写项目名称"
+    : !hasDiagnosticInput
+      ? "请至少填写一个画布模块或重点分析问题"
+      : null;
+  const canSubmit = !missingSubmitReason && phase !== "running";
 
   async function handleDiagnose() {
     if (!canSubmit) return;
@@ -82,6 +91,7 @@ export function CanvasDiagnosisPage() {
       setProgress(100);
       setPhase("done");
       setStatusMsg("诊断完成。");
+      setReportsRefreshKey((v) => v + 1);
     } catch (e) {
       setPhase("error");
       setStatusMsg(e instanceof ApiError ? `诊断失败：${e.message}` : "诊断失败");
@@ -89,7 +99,17 @@ export function CanvasDiagnosisPage() {
   }
 
   const stepIndex =
-    phase === "idle" ? 0 : phase === "running" ? 2 : phase === "done" ? 3 : 1;
+    phase === "idle"
+      ? 0
+      : phase === "running"
+        ? progress >= 90
+          ? 3
+          : progress > 0
+            ? 2
+            : 1
+        : phase === "done"
+          ? 3
+          : 1;
 
   return (
     <main className="flex min-w-0 flex-1 overflow-hidden">
@@ -106,6 +126,7 @@ export function CanvasDiagnosisPage() {
             phase={phase}
             progress={progress}
             statusMsg={statusMsg}
+            submitHint={missingSubmitReason}
             canSubmit={canSubmit}
             onTitle={setTitle}
             onCompany={setCompany}
@@ -113,7 +134,7 @@ export function CanvasDiagnosisPage() {
             onModule={setModule}
             onDiagnose={handleDiagnose}
           />
-          <RecentDiagnoses />
+          <RecentDiagnoses refreshKey={reportsRefreshKey} />
         </div>
         {result && <ResultPanel result={result} />}
         <p className="py-5 text-center text-[12px] text-slate-400">
@@ -180,6 +201,7 @@ function ProjectForm({
   phase,
   progress,
   statusMsg,
+  submitHint,
   canSubmit,
   onTitle,
   onCompany,
@@ -195,6 +217,7 @@ function ProjectForm({
   phase: Phase;
   progress: number;
   statusMsg: string | null;
+  submitHint: string | null;
   canSubmit: boolean;
   onTitle: (v: string) => void;
   onCompany: (v: string) => void;
@@ -258,14 +281,18 @@ function ProjectForm({
       </div>
 
       <div className="mt-5 flex items-center gap-4">
-        {statusMsg && (
+        {(statusMsg || submitHint) && (
           <span
             className={cn(
               "text-[12.5px] font-bold",
-              phase === "error" ? "text-rose-500" : phase === "done" ? "text-emerald-600" : "text-brand"
+              phase === "error" || (!statusMsg && submitHint)
+                ? "text-rose-500"
+                : phase === "done"
+                  ? "text-emerald-600"
+                  : "text-brand"
             )}
           >
-            {statusMsg}
+            {statusMsg ?? submitHint}
           </span>
         )}
         <button
@@ -310,12 +337,13 @@ function Field({
   );
 }
 
-function RecentDiagnoses() {
+function RecentDiagnoses({ refreshKey }: { refreshKey: number }) {
   const [reports, setReports] = useState<DiagnosisReport[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
     reportsApi
       .list()
       .then((d) => !cancelled && setReports(d.slice(0, 8)))
@@ -324,7 +352,7 @@ function RecentDiagnoses() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshKey]);
 
   return (
     <Card className="px-5 py-5">
@@ -341,7 +369,7 @@ function RecentDiagnoses() {
           <p className="text-[12px] text-slate-400">暂无诊断记录</p>
         )}
         {reports.map((r) => (
-          <a key={r.id} href="/reports" className="block">
+          <a key={r.id} href={`/reports?reportId=${encodeURIComponent(r.id)}`} className="block">
             <div className="text-[13px] font-black text-[#172452] hover:text-brand">{r.title}</div>
             <div className="mt-1 flex items-center justify-between">
               <span className="text-[11px] text-slate-400">
@@ -361,6 +389,10 @@ function RecentDiagnoses() {
 function ResultPanel({ result }: { result: DiagnoseResult }) {
   const report = result.report;
   const moduleEntries = Object.entries(report.module_findings ?? {});
+  const evidenceRefs = (report.evidence_refs ?? [])
+    .map(formatEvidenceRef)
+    .filter((item): item is EvidenceRefItem => Boolean(item));
+  const qualityScores = Object.entries(result.quality?.dimension_scores ?? {});
   return (
     <Card className="mt-5 px-6 py-5">
       <div className="flex items-center gap-3">
@@ -374,7 +406,7 @@ function ResultPanel({ result }: { result: DiagnoseResult }) {
           </p>
         </div>
         <a
-          href="/reports"
+          href={`/reports?reportId=${encodeURIComponent(report.id)}`}
           className="brand-gradient ml-auto flex h-10 items-center gap-2 rounded-lg px-4 text-[13px] font-bold text-white shadow-soft"
         >
           查看完整报告
@@ -392,6 +424,59 @@ function ResultPanel({ result }: { result: DiagnoseResult }) {
         <ResultList title="关键假设" tone="bg-violet-50 text-violet" items={report.key_assumptions} />
         <ResultList title="主要风险" tone="bg-orange-50 text-orange-500" items={report.risks} danger />
         <ResultList title="方案建议" tone="bg-emerald-50 text-emerald-600" items={report.recommended_actions} />
+      </div>
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <div className="rounded-2xl border border-line bg-white px-5 py-4">
+          <div className="flex items-center gap-2 text-[13px] font-black text-ink">
+            <Icon name="database" className="h-4 w-4 text-brand" />
+            本次调用依据
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {evidenceRefs.length === 0 && (
+              <span className="text-[12px] text-slate-400">暂无可展示依据</span>
+            )}
+            {evidenceRefs.slice(0, 12).map((item, index) => (
+              <span
+                key={`${item.label}-${index}`}
+                className="rounded-full border border-[#d8d2ff] bg-[#f6f3ff] px-3 py-1 text-[12px] font-bold text-brand"
+              >
+                {item.type ? `${item.type} · ` : ""}
+                {item.label}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-line bg-white px-5 py-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-[13px] font-black text-ink">
+              <Icon name="shield" className="h-4 w-4 text-emerald-600" />
+              质量检查
+            </div>
+            <span
+              className={cn(
+                "rounded-full px-2.5 py-1 text-[11px] font-black",
+                result.quality?.passed
+                  ? "bg-emerald-50 text-emerald-600"
+                  : "bg-orange-50 text-orange-500"
+              )}
+            >
+              {result.quality?.passed ? "已通过" : "需复核"}
+            </span>
+          </div>
+          <div className="mt-3 space-y-2">
+            {qualityScores.length === 0 && (
+              <p className="text-[12px] text-slate-400">暂无质量维度评分</p>
+            )}
+            {qualityScores.slice(0, 4).map(([key, value]) => (
+              <div key={key} className="flex items-center justify-between gap-3 text-[12px] font-bold text-[#3b4a6b]">
+                <span>{qualityLabel(key)}</span>
+                <span>{pct(Number(value))} 分</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
       {moduleEntries.length > 0 && (
@@ -414,6 +499,26 @@ function ResultPanel({ result }: { result: DiagnoseResult }) {
       )}
     </Card>
   );
+}
+
+function formatEvidenceRef(ref: unknown): EvidenceRefItem | null {
+  if (!ref || typeof ref !== "object") return null;
+  const row = ref as Record<string, unknown>;
+  const label = String(row.ref ?? row.title ?? row.node_name ?? "").trim();
+  if (!label) return null;
+  const rawType = String(row.type ?? row.extension_type ?? "").trim();
+  const type =
+    rawType === "methodology_node"
+      ? "方法论节点"
+      : rawType === "approved_expansion"
+        ? "审核扩展"
+        : rawType || undefined;
+  return { label, type };
+}
+
+function qualityLabel(key: string) {
+  // 复用报告中心的 7 维度中文映射（与后端 dimension_scores 实际键名一致）
+  return dimensionLabels[key] ?? key;
 }
 
 function ResultList({

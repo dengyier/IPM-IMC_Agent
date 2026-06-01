@@ -1,10 +1,7 @@
 import { Sidebar } from "@/components/sidebar";
 import { Topbar } from "@/components/topbar";
-import { SearchHero } from "@/components/search-hero";
-import { StatsRow } from "@/components/stats-row";
-import { MiddleCards } from "@/components/middle-cards";
-import { KnowledgeGraph } from "@/components/knowledge-graph";
 import { RightPanel } from "@/components/right-panel";
+import { AssistantProvider } from "@/components/assistant-context";
 
 export default function DashboardPage() {
   return (
@@ -15,18 +12,11 @@ export default function DashboardPage() {
         <main className="flex-1 overflow-y-auto px-8 py-6">
           <Topbar />
 
-          <div className="mt-6 flex gap-6">
-            {/* Center column */}
-            <div className="flex min-w-0 flex-1 flex-col gap-5">
-              <SearchHero />
-              <StatsRow />
-              <MiddleCards />
-              <KnowledgeGraph />
+          <AssistantProvider>
+            <div className="mt-6">
+              <RightPanel />
             </div>
-
-            {/* Right column */}
-            <RightPanel />
-          </div>
+          </AssistantProvider>
         </main>
 
         <footer className="flex items-center justify-center gap-3 px-8 py-5 text-[12px] text-slate-400">

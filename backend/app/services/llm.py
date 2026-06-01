@@ -61,21 +61,31 @@ class LLMService:
                     "detail": f"{type(exc).__name__}: {exc}"}
 
     def chat_json(
-        self, system_prompt: str, user_prompt: str, temperature: float = 0.2
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.2,
+        max_tokens: int | None = None,
     ) -> dict | None:
-        """返回解析后的 JSON 对象；不可用或解析失败时返回 None。"""
+        """返回解析后的 JSON 对象；不可用或解析失败时返回 None。
+
+        max_tokens：详尽报告等场景可显式放大输出上限（DeepSeek 单次最高 8192）。
+        """
         if not self._client:
             return None
         try:
-            resp = self._client.chat.completions.create(
-                model=self.model,
-                messages=[
+            kwargs: dict = {
+                "model": self.model,
+                "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                response_format={"type": "json_object"},
-                temperature=temperature,
-            )
+                "response_format": {"type": "json_object"},
+                "temperature": temperature,
+            }
+            if max_tokens:
+                kwargs["max_tokens"] = max_tokens
+            resp = self._client.chat.completions.create(**kwargs)
             content = resp.choices[0].message.content or "{}"
             return json.loads(content)
         except Exception:

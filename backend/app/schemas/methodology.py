@@ -124,6 +124,7 @@ class NodeCardOut(BaseModel):
     edge_count: int = 0
     expansion_count: int = 0
     source_chunk_count: int = 0
+    source_types: list[str] = Field(default_factory=list)
 
 
 class PaginatedNodes(BaseModel):
@@ -136,6 +137,19 @@ class PaginatedNodes(BaseModel):
 class NodeCategoryCount(BaseModel):
     label: str
     count: int
+
+
+class NodeFilterOption(BaseModel):
+    label: str
+    value: str
+    count: int
+
+
+class NodeFilterOptions(BaseModel):
+    statuses: list[NodeFilterOption] = Field(default_factory=list)
+    source_types: list[NodeFilterOption] = Field(default_factory=list)
+    scenarios: list[NodeFilterOption] = Field(default_factory=list)
+    versions: list[NodeFilterOption] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #

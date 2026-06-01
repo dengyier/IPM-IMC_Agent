@@ -201,6 +201,65 @@ export const dashboardApi = {
     api.get<RecentReviewTask[]>(`/api/dashboard/recent-review-tasks?limit=${limit}`),
 };
 
+// ---- 智能助手 ----
+
+export interface AssistantNodeRef {
+  id: string;
+  name: string;
+  category: string | null;
+  score: number;
+}
+
+export interface AssistantAskResponse {
+  conversation_id: string;
+  answer: string;
+  intent: string;
+  used_llm: boolean;
+  action_label: string | null;
+  action_href: string | null;
+  node_refs: AssistantNodeRef[];
+  suggested_questions: string[];
+}
+
+export interface AssistantMessageRecord {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  node_refs: AssistantNodeRef[];
+  suggested_questions: string[];
+  used_llm: boolean;
+  action_label: string | null;
+  action_href: string | null;
+  created_at: string;
+}
+
+export interface AssistantConversationRecord {
+  id: string;
+  title: string;
+  message_count: number;
+  updated_at: string;
+  created_at: string;
+}
+
+export const assistantApi = {
+  conversations: () =>
+    api.get<AssistantConversationRecord[]>("/api/assistant/conversations"),
+  createConversation: (title?: string) =>
+    api.post<AssistantConversationRecord>("/api/assistant/conversations", { title }),
+  deleteConversation: (id: string) =>
+    api.del<void>(`/api/assistant/conversations/${id}`),
+  messages: (conversationId?: string) =>
+    api.get<AssistantMessageRecord[]>(
+      `/api/assistant/messages${conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : ""}`
+    ),
+  ask: (question: string, companyContext?: string, conversationId?: string | null) =>
+    api.post<AssistantAskResponse>("/api/assistant/ask", {
+      question,
+      company_context: companyContext,
+      conversation_id: conversationId || undefined,
+    }),
+};
+
 // ---- 系统健康 / 连接测试 / 只读配置 ----
 
 export type ComponentStatus = "ok" | "offline_fallback" | "error" | "offline";
@@ -255,12 +314,47 @@ export interface SettingsView {
   embedding_api_key_masked: string;
 }
 
+export interface EditableSystemSettings {
+  system_name: string;
+  system_short_name: string;
+  system_version: string;
+  deployment_environment: string;
+  deployed_at: string;
+  timezone: string;
+  company_name: string;
+  company_short_name: string;
+  company_website: string;
+  language: string;
+  date_format: string;
+  time_format: string;
+  number_format: string;
+  currency: string;
+  theme_mode: string;
+  accent_color: string;
+  nav_density: string;
+  allow_registration: boolean;
+  require_2fa: boolean;
+  require_email_verification: boolean;
+  audit_log_enabled: boolean;
+  auto_backup_enabled: boolean;
+  backup_retention_days: number;
+  updated_at: string | null;
+}
+
+export type EditableSystemSettingsUpdate = Partial<
+  Omit<EditableSystemSettings, "updated_at">
+>;
+
 export const systemApi = {
   health: () => api.get<SystemHealth>("/api/system/health"),
   testLlm: () => api.post<LLMTestResult>("/api/system/test-llm"),
   testVectorStore: () =>
     api.post<VectorStoreTestResult>("/api/system/test-vector-store"),
   settings: () => api.get<SettingsView>("/api/system/settings"),
+  editableSettings: () =>
+    api.get<EditableSystemSettings>("/api/system/editable-settings"),
+  updateEditableSettings: (payload: EditableSystemSettingsUpdate) =>
+    api.put<EditableSystemSettings>("/api/system/editable-settings", payload),
 };
 
 // ---- 知识节点库 ----
@@ -275,6 +369,7 @@ export interface NodeCard {
   edge_count: number;
   expansion_count: number;
   source_chunk_count: number;
+  source_types: string[];
 }
 
 export interface PaginatedNodes {
@@ -287,6 +382,19 @@ export interface PaginatedNodes {
 export interface NodeCategory {
   label: string;
   count: number;
+}
+
+export interface NodeFilterOption {
+  label: string;
+  value: string;
+  count: number;
+}
+
+export interface NodeFilterOptions {
+  statuses: NodeFilterOption[];
+  source_types: NodeFilterOption[];
+  scenarios: NodeFilterOption[];
+  versions: NodeFilterOption[];
 }
 
 export interface NodeDetail extends NodeCard {
@@ -358,16 +466,32 @@ export interface MethodologyGraph {
 }
 
 export const nodesApi = {
-  list: (params: { category?: string; q?: string; page?: number; pageSize?: number } = {}) => {
+  list: (
+    params: {
+      category?: string;
+      q?: string;
+      status?: string;
+      sourceType?: string;
+      scenario?: string;
+      version?: string;
+      page?: number;
+      pageSize?: number;
+    } = {}
+  ) => {
     const qs = new URLSearchParams();
     if (params.category) qs.set("category", params.category);
     if (params.q) qs.set("q", params.q);
+    if (params.status) qs.set("status", params.status);
+    if (params.sourceType) qs.set("source_type", params.sourceType);
+    if (params.scenario) qs.set("scenario", params.scenario);
+    if (params.version) qs.set("version", params.version);
     qs.set("page", String(params.page ?? 1));
     qs.set("page_size", String(params.pageSize ?? 20));
     return api.get<PaginatedNodes>(`/api/methodology/nodes?${qs.toString()}`);
   },
   categories: (top = 8) =>
     api.get<NodeCategory[]>(`/api/methodology/nodes/categories?top=${top}`),
+  filterOptions: () => api.get<NodeFilterOptions>("/api/methodology/nodes/filter-options"),
   detail: (id: string) => api.get<NodeDetail>(`/api/methodology/nodes/${id}`),
   edges: (id: string) => api.get<NodeEdge[]>(`/api/methodology/nodes/${id}/edges`),
   versions: (id: string) =>

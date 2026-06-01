@@ -1,5 +1,10 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
 import { Card } from "@/components/card";
 import { Icon } from "@/components/icon";
+import { ApiError, EditableSystemSettings, systemApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const settingsTabs = [
@@ -13,34 +18,17 @@ const settingsTabs = [
   { icon: "history", label: "日志审计" },
 ];
 
-const systemInfo = [
-  ["系统名称", "IMC&IPM 商业决策智能体"],
-  ["系统简称", "IMC&IPM"],
-  ["系统版本", "v2.3.1"],
-  ["部署环境", "生产环境"],
-  ["部署时间", "2025-03-15 10:30:00"],
-  ["系统时区", "(GMT+08:00) 北京，上海，香港"],
-];
-
-const localeSettings = [
-  ["系统语言", "简体中文"],
-  ["日期格式", "YYYY-MM-DD"],
-  ["时间格式", "24 小时制 (HH:mm)"],
-  ["数字格式", "1,234.56"],
-  ["货币单位", "人民币 (¥)"],
-];
-
 const themeModes = [
-  { icon: "sun", label: "浅色模式", active: true },
-  { icon: "moon", label: "深色模式" },
-  { icon: "monitor", label: "跟随系统" },
+  { icon: "sun", label: "浅色模式", value: "light" },
+  { icon: "moon", label: "深色模式", value: "dark" },
+  { icon: "monitor", label: "跟随系统", value: "system" },
 ];
 
 const accentColors = ["#5B4BFF", "#3B82F6", "#22C55E", "#F59E0B", "#EC4899", "#A855F7"];
 
 const densityModes = [
-  { icon: "panel", title: "折叠模式", desc: "收起侧边栏，仅显示图标" },
-  { icon: "list", title: "展开模式", desc: "完整显示菜单文字和图标", active: true },
+  { icon: "panel", title: "折叠模式", desc: "收起侧边栏，仅显示图标", value: "collapsed" },
+  { icon: "list", title: "展开模式", desc: "完整显示菜单文字和图标", value: "expanded" },
 ];
 
 type Control =
@@ -55,49 +43,148 @@ interface ConfigItem {
   control: Control;
 }
 
-const systemConfig: ConfigItem[] = [
-  { icon: "users", title: "新用户注册", desc: "允许新用户自动注册", control: { kind: "toggle", on: false } },
-  { icon: "shield", title: "双重认证", desc: "登录时需要双重身份验证", control: { kind: "toggle", on: true } },
-  { icon: "file-check", title: "邮箱验证", desc: "新用户需进行邮箱验证激活", control: { kind: "toggle", on: false } },
-  { icon: "history", title: "操作日志记录", desc: "记录用户关键操作日志", control: { kind: "toggle", on: true } },
-  { icon: "database", title: "自动备份", desc: "每日自动备份系统数据", control: { kind: "text", value: "已开启" } },
-  { icon: "calendar", title: "备份保留天数", desc: "保留最近 30 天的备份", control: { kind: "select", value: "30 天" } },
-];
-
-const maintenance = [
-  { icon: "database", tone: "bg-[#f0edff] text-brand", title: "数据备份", desc: "备份系统数据和知识库", meta: "上次备份：2025-06-02 02:00", btn: "立即备份" },
-  { icon: "refresh", tone: "bg-blue-50 text-blue-500", title: "数据恢复", desc: "从备份文件恢复系统数据", meta: "上次恢复：2025-05-28 15:30", btn: "恢复数据" },
-  { icon: "trash", tone: "bg-orange-50 text-orange-500", title: "缓存清理", desc: "清理系统缓存和临时文件", meta: "上次清理：2025-06-01 10:20", btn: "立即清理" },
-  { icon: "rotate-ccw", tone: "bg-emerald-50 text-emerald-600", title: "系统更新", desc: "检查并安装系统更新", meta: "当前版本：v2.3.1", btn: "检查更新" },
-  { icon: "upload", tone: "bg-violet-50 text-violet", title: "导出系统配置", desc: "导出当前系统配置文件", meta: "", btn: "导出配置" },
-  { icon: "x-circle", tone: "bg-rose-50 text-rose-500", title: "重置系统配置", desc: "将系统配置恢复为默认", meta: "", btn: "重置配置", danger: true },
-];
+const DEFAULT_SETTINGS: EditableSystemSettings = {
+  system_name: "IMC&IPM 商业决策智能体",
+  system_short_name: "IMC&IPM",
+  system_version: "v2.3.1",
+  deployment_environment: "生产环境",
+  deployed_at: "2025-03-15 10:30:00",
+  timezone: "(GMT+08:00) 北京，上海，香港",
+  company_name: "智策科技有限公司",
+  company_short_name: "智策科技",
+  company_website: "https://www.zhicetec.com",
+  language: "简体中文",
+  date_format: "YYYY-MM-DD",
+  time_format: "24 小时制 (HH:mm)",
+  number_format: "1,234.56",
+  currency: "人民币 (¥)",
+  theme_mode: "light",
+  accent_color: "#5B4BFF",
+  nav_density: "expanded",
+  allow_registration: false,
+  require_2fa: true,
+  require_email_verification: false,
+  audit_log_enabled: true,
+  auto_backup_enabled: true,
+  backup_retention_days: 30,
+  updated_at: null,
+};
 
 const assistantPoints = ["查找系统设置项", "解释配置含义", "推荐最佳实践", "检测配置风险", "生成配置报告"];
 const assistantPrompts = ["如何设置更安全的密码策略？", "如何配置邮件通知？", "如何管理用户角色权限？", "如何备份和恢复系统数据？"];
 
 export function SettingsPage() {
+  const [settings, setSettings] = useState<EditableSystemSettings>(DEFAULT_SETTINGS);
+  const [draft, setDraft] = useState<EditableSystemSettings>(DEFAULT_SETTINGS);
+  const [editing, setEditing] = useState<"system" | "enterprise" | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    systemApi
+      .editableSettings()
+      .then((data) => {
+        if (cancelled) return;
+        setSettings(data);
+        setDraft(data);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setMessage(e instanceof ApiError ? `设置加载失败：${e.message}` : "设置加载失败");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function updateDraft<K extends keyof EditableSystemSettings>(key: K, value: EditableSystemSettings[K]) {
+    setDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function startEdit(section: "system" | "enterprise") {
+    setDraft(settings);
+    setEditing(section);
+    setMessage(null);
+  }
+
+  function cancelEdit() {
+    setDraft(settings);
+    setEditing(null);
+    setMessage(null);
+  }
+
+  async function saveSettings(successText = "设置已保存") {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const saved = await systemApi.updateEditableSettings(draft);
+      setSettings(saved);
+      setDraft(saved);
+      setEditing(null);
+      setMessage(successText);
+    } catch (e) {
+      setMessage(e instanceof ApiError ? `保存失败：${e.message}` : "保存失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
       <SettingsHeader />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <section className="flex min-w-0 flex-1 flex-col overflow-y-auto px-8 pb-6 pt-5">
           <SettingsTabs />
-          <h2 className="mt-7 text-[19px] font-black text-ink">基本设置</h2>
+          <div className="mt-7 flex items-center justify-between gap-4">
+            <h2 className="text-[19px] font-black text-ink">基本设置</h2>
+            <div className="min-h-5 text-[12.5px] font-bold">
+              {loading && <span className="text-slate-400">正在加载设置…</span>}
+              {!loading && message && (
+                <span className={message.includes("失败") ? "text-rose-500" : "text-emerald-600"}>
+                  {message}
+                </span>
+              )}
+            </div>
+          </div>
           <div className="mt-4 grid gap-5 xl:grid-cols-3">
-            <SystemInfoCard />
-            <EnterpriseCard />
-            <LocaleCard />
+            <SystemInfoCard
+              draft={draft}
+              editing={editing === "system"}
+              saving={saving}
+              onEdit={() => startEdit("system")}
+              onCancel={cancelEdit}
+              onSave={() => saveSettings("系统信息已保存")}
+              onChange={updateDraft}
+            />
+            <EnterpriseCard
+              draft={draft}
+              editing={editing === "enterprise"}
+              saving={saving}
+              onEdit={() => startEdit("enterprise")}
+              onCancel={cancelEdit}
+              onSave={() => saveSettings("企业信息已保存")}
+              onChange={updateDraft}
+            />
+            <SystemConfigCard
+              draft={draft}
+              saving={saving}
+              onChange={updateDraft}
+              onSave={() => saveSettings("系统配置已保存")}
+            />
           </div>
-          <div className="mt-5 grid gap-5 xl:grid-cols-2">
-            <AppearanceCard />
-            <SystemConfigCard />
-          </div>
-          <h2 className="mt-8 text-[19px] font-black text-ink">系统维护</h2>
-          <div className="mt-4 grid grid-cols-2 gap-5 md:grid-cols-3 xl:grid-cols-6">
-            {maintenance.map((m) => (
-              <MaintenanceCard key={m.title} item={m} />
-            ))}
+          <div className="mt-5 grid gap-5">
+            <AppearanceCard
+              draft={draft}
+              saving={saving}
+              onChange={updateDraft}
+              onSave={() => saveSettings("外观设置已保存")}
+            />
           </div>
           <SettingsFooter />
         </section>
@@ -163,44 +250,166 @@ function SettingsTabs() {
   );
 }
 
-function SectionCard({ title, action, children }: { title: string; action?: string; children: React.ReactNode }) {
+function SectionCard({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <Card className="flex flex-col px-6 py-5">
       <div className="flex items-center justify-between">
         <h3 className="text-[16px] font-black text-ink">{title}</h3>
-        {action && (
-          <button className="flex items-center gap-1 text-[12.5px] font-bold text-brand">
-            <Icon name="pencil" className="h-3.5 w-3.5" />
-            {action}
-          </button>
-        )}
+        {action}
       </div>
       <div className="mt-5 flex-1">{children}</div>
     </Card>
   );
 }
 
-function SystemInfoCard() {
+type SettingsChange = <K extends keyof EditableSystemSettings>(
+  key: K,
+  value: EditableSystemSettings[K]
+) => void;
+
+function CardActions({
+  editing,
+  saving,
+  onEdit,
+  onCancel,
+  onSave,
+}: {
+  editing: boolean;
+  saving: boolean;
+  onEdit: () => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  if (!editing) {
+    return (
+      <button onClick={onEdit} className="flex items-center gap-1 text-[12.5px] font-bold text-brand">
+        <Icon name="pencil" className="h-3.5 w-3.5" />
+        编辑
+      </button>
+    );
+  }
   return (
-    <SectionCard title="系统信息" action="编辑">
+    <div className="flex items-center gap-2">
+      <button
+        onClick={onCancel}
+        disabled={saving}
+        className="h-8 rounded-lg border border-line bg-white px-3 text-[12px] font-bold text-slate-500 disabled:opacity-50"
+      >
+        取消
+      </button>
+      <button
+        onClick={onSave}
+        disabled={saving}
+        className="brand-gradient h-8 rounded-lg px-3 text-[12px] font-bold text-white shadow-soft disabled:opacity-50"
+      >
+        {saving ? "保存中…" : "保存"}
+      </button>
+    </div>
+  );
+}
+
+function EditableRow({
+  label,
+  value,
+  editing,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  editing: boolean;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 text-[13px]">
+      <span className="shrink-0 font-medium text-slate-400">{label}</span>
+      {editing ? (
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="h-9 min-w-0 flex-1 rounded-lg border border-line bg-white px-3 text-right text-[13px] font-bold text-[#172452] outline-none focus:border-brand/60"
+        />
+      ) : (
+        <span className="text-right font-bold text-[#172452]">{value}</span>
+      )}
+    </div>
+  );
+}
+
+function SystemInfoCard({
+  draft,
+  editing,
+  saving,
+  onEdit,
+  onCancel,
+  onSave,
+  onChange,
+}: {
+  draft: EditableSystemSettings;
+  editing: boolean;
+  saving: boolean;
+  onEdit: () => void;
+  onCancel: () => void;
+  onSave: () => void;
+  onChange: SettingsChange;
+}) {
+  return (
+    <SectionCard
+      title="系统信息"
+      action={
+        <CardActions
+          editing={editing}
+          saving={saving}
+          onEdit={onEdit}
+          onCancel={onCancel}
+          onSave={onSave}
+        />
+      }
+    >
       <div className="space-y-3.5">
-        {systemInfo.map(([label, value]) => (
-          <div key={label} className="flex items-center justify-between gap-4 text-[13px]">
-            <span className="shrink-0 font-medium text-slate-400">{label}</span>
-            <span className="text-right font-bold text-[#172452]">{value}</span>
-          </div>
-        ))}
+        <EditableRow label="系统名称" value={draft.system_name} editing={editing} onChange={(v) => onChange("system_name", v)} />
+        <EditableRow label="系统简称" value={draft.system_short_name} editing={editing} onChange={(v) => onChange("system_short_name", v)} />
+        <EditableRow label="系统版本" value={draft.system_version} editing={editing} onChange={(v) => onChange("system_version", v)} />
+        <EditableRow label="部署环境" value={draft.deployment_environment} editing={editing} onChange={(v) => onChange("deployment_environment", v)} />
+        <EditableRow label="部署时间" value={draft.deployed_at} editing={editing} onChange={(v) => onChange("deployed_at", v)} />
+        <EditableRow label="系统时区" value={draft.timezone} editing={editing} onChange={(v) => onChange("timezone", v)} />
       </div>
     </SectionCard>
   );
 }
 
-function EnterpriseCard() {
+function EnterpriseCard({
+  draft,
+  editing,
+  saving,
+  onEdit,
+  onCancel,
+  onSave,
+  onChange,
+}: {
+  draft: EditableSystemSettings;
+  editing: boolean;
+  saving: boolean;
+  onEdit: () => void;
+  onCancel: () => void;
+  onSave: () => void;
+  onChange: SettingsChange;
+}) {
   return (
-    <SectionCard title="企业信息" action="编辑">
+    <SectionCard
+      title="企业信息"
+      action={
+        <CardActions
+          editing={editing}
+          saving={saving}
+          onEdit={onEdit}
+          onCancel={onCancel}
+          onSave={onSave}
+        />
+      }
+    >
       <div className="space-y-3.5">
-        <Row label="企业名称" value="智策科技有限公司" />
-        <Row label="企业简称" value="智策科技" />
+        <EditableRow label="企业名称" value={draft.company_name} editing={editing} onChange={(v) => onChange("company_name", v)} />
+        <EditableRow label="企业简称" value={draft.company_short_name} editing={editing} onChange={(v) => onChange("company_short_name", v)} />
         <div className="flex items-start justify-between gap-4 text-[13px]">
           <span className="shrink-0 pt-3 font-medium text-slate-400">企业 Logo</span>
           <div className="flex items-center gap-3">
@@ -216,48 +425,23 @@ function EnterpriseCard() {
             </div>
           </div>
         </div>
-        <div className="flex items-center justify-between gap-4 text-[13px]">
-          <span className="shrink-0 font-medium text-slate-400">企业官网</span>
-          <a className="font-bold text-brand" href="#">https://www.zhicetec.com</a>
-        </div>
+        <EditableRow label="企业官网" value={draft.company_website} editing={editing} onChange={(v) => onChange("company_website", v)} />
       </div>
     </SectionCard>
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-4 text-[13px]">
-      <span className="shrink-0 font-medium text-slate-400">{label}</span>
-      <span className="text-right font-bold text-[#172452]">{value}</span>
-    </div>
-  );
-}
-
-function LocaleCard() {
-  return (
-    <SectionCard title="系统语言与区域">
-      <div className="space-y-4">
-        {localeSettings.map(([label, value]) => (
-          <label key={label} className="block">
-            <span className="mb-1.5 block text-[12.5px] font-bold text-[#172452]">{label}</span>
-            <button className="flex h-10 w-full items-center justify-between rounded-lg border border-line bg-white px-3.5 text-[13px] font-semibold text-[#172452]">
-              {value}
-              <Icon name="chevron-down" className="h-4 w-4 text-slate-400" />
-            </button>
-          </label>
-        ))}
-        <div className="flex justify-end pt-1">
-          <button className="brand-gradient flex h-10 items-center justify-center rounded-xl px-8 text-[13px] font-bold text-white shadow-soft">
-            保存
-          </button>
-        </div>
-      </div>
-    </SectionCard>
-  );
-}
-
-function AppearanceCard() {
+function AppearanceCard({
+  draft,
+  saving,
+  onChange,
+  onSave,
+}: {
+  draft: EditableSystemSettings;
+  saving: boolean;
+  onChange: SettingsChange;
+  onSave: () => void;
+}) {
   return (
     <SectionCard title="系统外观设置">
       <div>
@@ -266,9 +450,10 @@ function AppearanceCard() {
           {themeModes.map((m) => (
             <button
               key={m.label}
+              onClick={() => onChange("theme_mode", m.value)}
               className={cn(
                 "flex items-center gap-2.5 rounded-xl border px-4 py-3 text-[13px] font-bold transition-colors",
-                m.active ? "border-brand bg-[#f6f5ff] text-brand ring-1 ring-brand/20" : "border-line bg-white text-slate-500"
+                draft.theme_mode === m.value ? "border-brand bg-[#f6f5ff] text-brand ring-1 ring-brand/20" : "border-line bg-white text-slate-500"
               )}
             >
               <Icon name={m.icon} className="h-[18px] w-[18px]" />
@@ -282,13 +467,14 @@ function AppearanceCard() {
           {accentColors.map((color, index) => (
             <button
               key={color}
+              onClick={() => onChange("accent_color", color)}
               className={cn(
                 "flex h-8 w-8 items-center justify-center rounded-full ring-offset-2 transition",
-                index === 0 && "ring-2 ring-brand"
+                draft.accent_color === color && "ring-2 ring-brand"
               )}
               style={{ backgroundColor: color }}
             >
-              {index === 0 && <Icon name="check" className="h-4 w-4 text-white" />}
+              {draft.accent_color === color && <Icon name="check" className="h-4 w-4 text-white" />}
             </button>
           ))}
         </div>
@@ -297,29 +483,82 @@ function AppearanceCard() {
           {densityModes.map((d) => (
             <button
               key={d.title}
+              onClick={() => onChange("nav_density", d.value)}
               className={cn(
                 "flex items-start gap-3 rounded-xl border px-4 py-3.5 text-left transition-colors",
-                d.active ? "border-brand bg-[#f6f5ff] ring-1 ring-brand/20" : "border-line bg-white"
+                draft.nav_density === d.value ? "border-brand bg-[#f6f5ff] ring-1 ring-brand/20" : "border-line bg-white"
               )}
             >
-              <Icon name={d.icon} className={cn("mt-0.5 h-[18px] w-[18px]", d.active ? "text-brand" : "text-slate-400")} />
+              <Icon name={d.icon} className={cn("mt-0.5 h-[18px] w-[18px]", draft.nav_density === d.value ? "text-brand" : "text-slate-400")} />
               <div>
-                <div className={cn("text-[13px] font-bold", d.active ? "text-brand" : "text-[#172452]")}>{d.title}</div>
+                <div className={cn("text-[13px] font-bold", draft.nav_density === d.value ? "text-brand" : "text-[#172452]")}>{d.title}</div>
                 <div className="mt-1 text-[11px] font-medium text-slate-400">{d.desc}</div>
               </div>
             </button>
           ))}
+        </div>
+        <div className="mt-5 flex justify-end">
+          <button
+            onClick={onSave}
+            disabled={saving}
+            className="brand-gradient flex h-10 items-center justify-center rounded-xl px-8 text-[13px] font-bold text-white shadow-soft disabled:opacity-50"
+          >
+            {saving ? "保存中…" : "保存外观"}
+          </button>
         </div>
       </div>
     </SectionCard>
   );
 }
 
-function SystemConfigCard() {
+const configRows = [
+  { icon: "users", title: "新用户注册", desc: "允许新用户自动注册", key: "allow_registration" },
+  { icon: "shield", title: "双重认证", desc: "登录时需要双重身份验证", key: "require_2fa" },
+  { icon: "file-check", title: "邮箱验证", desc: "新用户需进行邮箱验证激活", key: "require_email_verification" },
+  { icon: "history", title: "操作日志记录", desc: "记录用户关键操作日志", key: "audit_log_enabled" },
+  { icon: "database", title: "自动备份", desc: "每日自动备份系统数据", key: "auto_backup_enabled" },
+] as const;
+
+function ToggleControl({
+  on,
+  onClick,
+}: {
+  on: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "relative flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
+        on ? "brand-gradient" : "bg-slate-200"
+      )}
+    >
+      <span
+        className={cn(
+          "absolute h-5 w-5 rounded-full bg-white shadow transition-all",
+          on ? "left-[22px]" : "left-0.5"
+        )}
+      />
+    </button>
+  );
+}
+
+function SystemConfigCard({
+  draft,
+  saving,
+  onChange,
+  onSave,
+}: {
+  draft: EditableSystemSettings;
+  saving: boolean;
+  onChange: SettingsChange;
+  onSave: () => void;
+}) {
   return (
     <SectionCard title="系统配置">
       <div className="grid grid-cols-2 gap-x-8 gap-y-5">
-        {systemConfig.map((item) => (
+        {configRows.map((item) => (
           <div key={item.title} className="flex items-center gap-3">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-50 text-slate-400">
               <Icon name={item.icon} className="h-[18px] w-[18px]" />
@@ -328,9 +567,41 @@ function SystemConfigCard() {
               <div className="text-[13px] font-bold text-[#172452]">{item.title}</div>
               <div className="mt-0.5 truncate text-[11px] font-medium text-slate-400">{item.desc}</div>
             </div>
-            <ControlView control={item.control} />
+            <ToggleControl
+              on={Boolean(draft[item.key])}
+              onClick={() => onChange(item.key, !draft[item.key])}
+            />
           </div>
         ))}
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-50 text-slate-400">
+            <Icon name="calendar" className="h-[18px] w-[18px]" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-bold text-[#172452]">备份保留天数</div>
+            <div className="mt-0.5 truncate text-[11px] font-medium text-slate-400">保留最近 {draft.backup_retention_days} 天的备份</div>
+          </div>
+          <select
+            value={draft.backup_retention_days}
+            onChange={(e) => onChange("backup_retention_days", Number(e.target.value))}
+            className="h-9 shrink-0 rounded-lg border border-line bg-white px-3 text-[12.5px] font-semibold text-[#172452] outline-none"
+          >
+            {[7, 14, 30, 60, 90].map((day) => (
+              <option key={day} value={day}>
+                {day} 天
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="mt-6 flex justify-end">
+        <button
+          onClick={onSave}
+          disabled={saving}
+          className="brand-gradient flex h-10 items-center justify-center rounded-xl px-8 text-[13px] font-bold text-white shadow-soft disabled:opacity-50"
+        >
+          {saving ? "保存中…" : "保存配置"}
+        </button>
       </div>
     </SectionCard>
   );
@@ -362,29 +633,6 @@ function ControlView({ control }: { control: Control }) {
       {control.value}
       <Icon name="chevron-down" className="h-3.5 w-3.5 text-slate-400" />
     </button>
-  );
-}
-
-function MaintenanceCard({ item }: { item: (typeof maintenance)[number] }) {
-  return (
-    <Card className="flex flex-col px-4 py-5">
-      <span className={cn("flex h-11 w-11 items-center justify-center rounded-xl", item.tone)}>
-        <Icon name={item.icon} className="h-5 w-5" />
-      </span>
-      <div className="mt-4 text-[14px] font-black text-ink">{item.title}</div>
-      <div className="mt-1.5 text-[11.5px] font-medium leading-5 text-slate-400">{item.desc}</div>
-      {item.meta && <div className="mt-2 text-[11px] text-slate-400">{item.meta}</div>}
-      <button
-        className={cn(
-          "mt-4 flex h-9 w-full items-center justify-center rounded-lg border text-[12.5px] font-bold transition-colors",
-          item.danger
-            ? "border-rose-200 bg-rose-50 text-rose-500 hover:bg-rose-100"
-            : "border-line bg-white text-brand hover:bg-[#f6f5ff]"
-        )}
-      >
-        {item.btn}
-      </button>
-    </Card>
   );
 }
 
