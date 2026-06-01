@@ -15,7 +15,7 @@ import { extensionTypeLabel, reviewStatusTone } from "@/lib/presentation";
 import { cn } from "@/lib/utils";
 
 const STEPS = [
-  { title: "提交笔记", desc: "上传或粘贴同学笔记" },
+  { title: "提交资料", desc: "上传或粘贴外部资料" },
   { title: "解析与理解", desc: "AI 切块 + 向量化" },
   { title: "匹配知识节点", desc: "对齐最相关的核心节点" },
   { title: "提取增量内容", desc: "生成扩展条目" },
@@ -128,9 +128,9 @@ function NoteHeader() {
   return (
     <header className="flex items-start justify-between gap-6">
       <div>
-        <h1 className="text-[27px] font-black tracking-[-0.03em] text-ink">同学笔记进化</h1>
+        <h1 className="text-[27px] font-black tracking-[-0.03em] text-ink">知识扩展</h1>
         <p className="mt-1.5 text-[13px] font-medium text-slate-500">
-          上传课后协同学习笔记，智能识别并匹配知识节点，让集体智慧反哺课程方法论
+          上传外部资料（笔记 / 案例 / 文档），智能匹配核心知识节点，沉淀为可复用的知识扩展
         </p>
       </div>
     </header>
@@ -259,7 +259,7 @@ function SubmitNote({
             <textarea
               value={text}
               onChange={(e) => onText(e.target.value)}
-              placeholder="粘贴同学笔记原文…"
+              placeholder="粘贴笔记 / 案例 / 文档原文…"
               className="mt-4 h-[190px] w-full resize-none rounded-xl border border-line bg-white px-4 py-3 text-[13px] font-medium leading-6 text-[#172452] outline-none placeholder:text-slate-400"
             />
           )}
@@ -479,8 +479,8 @@ function NoteAside() {
             <Icon name="boxes" className="h-5 w-5 text-white" />
           </div>
           <div>
-            <div className="text-[15px] font-bold text-ink">笔记进化助手</div>
-            <div className="text-[11px] text-slate-400">基于课程方法论的进化助手</div>
+            <div className="text-[15px] font-bold text-ink">知识扩展助手</div>
+            <div className="text-[11px] text-slate-400">基于核心方法论的知识扩展助手</div>
           </div>
           <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet">AI</span>
         </div>
