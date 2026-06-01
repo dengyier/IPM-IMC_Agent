@@ -28,6 +28,7 @@ from app.schemas.methodology import (
     NodeCategoryCount,
     NodeEdgeOut,
     NodeExpansionOut,
+    NodeFilterOptions,
     NodeVersionOut,
     PaginatedNodes,
     ProblemRoutingRuleOut,
@@ -175,12 +176,23 @@ def build_kernel(
 def list_nodes(
     category: str | None = None,
     q: str | None = None,
+    status: str | None = None,
+    source_type: str | None = None,
+    scenario: str | None = None,
+    version: str | None = None,
     page: int = 1,
     page_size: int = 20,
     db: Session = Depends(get_db),
 ) -> PaginatedNodes:
     return MethodologyQueryService(db).list_nodes(
-        category=category, q=q, page=page, page_size=page_size
+        category=category,
+        q=q,
+        status=status,
+        source_type=source_type,
+        scenario=scenario,
+        version=version,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -189,6 +201,11 @@ def list_node_categories(
     top: int = 8, db: Session = Depends(get_db)
 ) -> list[NodeCategoryCount]:
     return MethodologyQueryService(db).categories(top=top)
+
+
+@router.get("/nodes/filter-options", response_model=NodeFilterOptions)
+def get_node_filter_options(db: Session = Depends(get_db)) -> NodeFilterOptions:
+    return MethodologyQueryService(db).filter_options()
 
 
 @router.get("/graph", response_model=MethodologyGraphOut)

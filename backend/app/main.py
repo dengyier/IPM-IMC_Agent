@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.errors import install_error_handlers
 from app.api.routers import (
+    assistant,
     dashboard,
     diagnosis,
     expansion,
@@ -45,6 +46,7 @@ def create_app() -> FastAPI:
 
     app.include_router(system.router)
     app.include_router(tasks.router)
+    app.include_router(assistant.router)
     app.include_router(dashboard.router)
     app.include_router(methodology.router)
     app.include_router(expansion.router)

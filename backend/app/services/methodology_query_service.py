@@ -11,8 +11,10 @@ from sqlalchemy.orm import Session
 from app.db.models import (
     ExpansionItem,
     KnowledgeNodeVersion,
+    MethodologyChunk,
     MethodologyEdge,
     MethodologyNode,
+    MethodologySource,
 )
 from app.schemas.methodology import (
     GraphEdge,
@@ -22,6 +24,8 @@ from app.schemas.methodology import (
     NodeCategoryCount,
     NodeEdgeOut,
     NodeExpansionOut,
+    NodeFilterOption,
+    NodeFilterOptions,
     NodeVersionOut,
     PaginatedNodes,
 )
@@ -39,17 +43,25 @@ class MethodologyQueryService:
         self,
         category: str | None = None,
         q: str | None = None,
+        status: str | None = None,
+        source_type: str | None = None,
+        scenario: str | None = None,
+        version: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> PaginatedNodes:
         page = max(1, page)
         page_size = max(1, min(page_size, 100))
 
-        base = self.db.query(MethodologyNode).filter(
-            MethodologyNode.status == "active"
-        )
+        base = self.db.query(MethodologyNode)
+        if status and status not in ("all", "全部", "全部状态"):
+            base = base.filter(MethodologyNode.status == status)
+        else:
+            base = base.filter(MethodologyNode.status == "active")
         if category and category not in ("全部节点", "全部"):
             base = base.filter(MethodologyNode.node_category == category)
+        if version and version not in ("all", "全部", "全部版本"):
+            base = base.filter(MethodologyNode.version == version)
         if q:
             like = f"%{q.strip()}%"
             base = base.filter(
@@ -59,16 +71,25 @@ class MethodologyQueryService:
                 )
             )
 
-        total = base.count()
-        rows = (
-            base.order_by(MethodologyNode.created_at.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-            .all()
-        )
+        rows_all = base.order_by(MethodologyNode.created_at.desc()).all()
+        if scenario and scenario not in ("all", "全部", "全部场景"):
+            rows_all = [
+                n for n in rows_all if scenario in (n.applicable_scenarios or [])
+            ]
+        if source_type and source_type not in ("all", "全部", "全部来源"):
+            source_chunk_ids = self._chunk_ids_by_source_type(source_type)
+            rows_all = [
+                n
+                for n in rows_all
+                if set(n.source_chunk_ids or []).intersection(source_chunk_ids)
+            ]
+
+        total = len(rows_all)
+        rows = rows_all[(page - 1) * page_size : page * page_size]
         node_ids = [n.id for n in rows]
         edge_counts = self._edge_counts(node_ids)
         exp_counts = self._expansion_counts(node_ids)
+        source_types = self._node_source_types(rows)
 
         items = [
             NodeCardOut(
@@ -81,6 +102,7 @@ class MethodologyQueryService:
                 edge_count=edge_counts.get(n.id, 0),
                 expansion_count=exp_counts.get(n.id, 0),
                 source_chunk_count=len(n.source_chunk_ids or []),
+                source_types=source_types.get(n.id, []),
             )
             for n in rows
         ]
@@ -114,6 +136,59 @@ class MethodologyQueryService:
         for cat, cnt in rows:
             out.append(NodeCategoryCount(label=cat or "未分类", count=cnt))
         return out
+
+    def filter_options(self) -> NodeFilterOptions:
+        nodes = (
+            self.db.query(MethodologyNode)
+            .filter(MethodologyNode.status == "active")
+            .all()
+        )
+        status_rows = (
+            self.db.query(MethodologyNode.status, func.count(MethodologyNode.id))
+            .group_by(MethodologyNode.status)
+            .order_by(func.count(MethodologyNode.id).desc())
+            .all()
+        )
+        version_rows = (
+            self.db.query(MethodologyNode.version, func.count(MethodologyNode.id))
+            .filter(MethodologyNode.status == "active")
+            .group_by(MethodologyNode.version)
+            .order_by(func.count(MethodologyNode.id).desc())
+            .all()
+        )
+
+        scenario_counts: dict[str, int] = {}
+        for n in nodes:
+            for s in n.applicable_scenarios or []:
+                if isinstance(s, str) and s.strip():
+                    scenario_counts[s.strip()] = scenario_counts.get(s.strip(), 0) + 1
+
+        source_counts: dict[str, int] = {}
+        source_types = self._node_source_types(nodes)
+        for types in source_types.values():
+            for t in types:
+                source_counts[t] = source_counts.get(t, 0) + 1
+
+        return NodeFilterOptions(
+            statuses=[
+                NodeFilterOption(label=s or "未定义", value=s or "", count=c)
+                for s, c in status_rows
+            ],
+            source_types=[
+                NodeFilterOption(label=t, value=t, count=c)
+                for t, c in sorted(source_counts.items(), key=lambda x: (-x[1], x[0]))
+            ],
+            scenarios=[
+                NodeFilterOption(label=s, value=s, count=c)
+                for s, c in sorted(
+                    scenario_counts.items(), key=lambda x: (-x[1], x[0])
+                )[:40]
+            ],
+            versions=[
+                NodeFilterOption(label=v or "未定义", value=v or "", count=c)
+                for v, c in version_rows
+            ],
+        )
 
     # --------------------------- 子资源 ---------------------------- #
 
@@ -313,3 +388,36 @@ class MethodologyQueryService:
             .all()
         )
         return {nid: c for nid, c in rows if nid}
+
+    def _chunk_ids_by_source_type(self, source_type: str) -> set[str]:
+        rows = (
+            self.db.query(MethodologyChunk.id)
+            .join(MethodologySource, MethodologyChunk.source_id == MethodologySource.id)
+            .filter(MethodologySource.source_type == source_type)
+            .all()
+        )
+        return {row[0] for row in rows}
+
+    def _node_source_types(self, nodes: list[MethodologyNode]) -> dict[str, list[str]]:
+        chunk_ids: set[str] = set()
+        for n in nodes:
+            chunk_ids.update(n.source_chunk_ids or [])
+        if not chunk_ids:
+            return {n.id: [] for n in nodes}
+
+        rows = (
+            self.db.query(MethodologyChunk.id, MethodologySource.source_type)
+            .join(MethodologySource, MethodologyChunk.source_id == MethodologySource.id)
+            .filter(MethodologyChunk.id.in_(chunk_ids))
+            .all()
+        )
+        chunk_type = {cid: st for cid, st in rows}
+        result: dict[str, list[str]] = {}
+        for n in nodes:
+            types = {
+                chunk_type[cid]
+                for cid in (n.source_chunk_ids or [])
+                if cid in chunk_type and chunk_type[cid]
+            }
+            result[n.id] = sorted(types)
+        return result

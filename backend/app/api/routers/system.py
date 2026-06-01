@@ -5,11 +5,16 @@ from __future__ import annotations
 import time
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
 from app.api.deps import get_app_settings, get_core_store, get_llm
 from app.core.config import Settings
+from app.db.models import SystemSettings
+from app.db.session import get_db
 from app.schemas.system import (
     ComponentHealth,
+    EditableSystemSettings,
+    EditableSystemSettingsUpdate,
     LLMTestResult,
     SettingsOut,
     SystemHealth,
@@ -31,6 +36,17 @@ def _mask_secret(value: str | None) -> str:
     if len(value) <= 8:
         return "****"
     return f"{value[:3]}****{value[-4:]}"
+
+
+def _get_or_create_editable_settings(db: Session) -> SystemSettings:
+    row = db.get(SystemSettings, "default")
+    if row:
+        return row
+    row = SystemSettings(id="default")
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 @router.get("/health", response_model=SystemHealth)
@@ -123,3 +139,31 @@ def get_settings_view(
         embedding_dim=settings.embedding_dim,
         embedding_api_key_masked=_mask_secret(settings.embedding_api_key),
     )
+
+
+@router.get("/editable-settings", response_model=EditableSystemSettings)
+def get_editable_settings(db: Session = Depends(get_db)) -> SystemSettings:
+    """Editable UI settings persisted in database."""
+    return _get_or_create_editable_settings(db)
+
+
+@router.put("/editable-settings", response_model=EditableSystemSettings)
+def update_editable_settings(
+    payload: EditableSystemSettingsUpdate,
+    db: Session = Depends(get_db),
+) -> SystemSettings:
+    """Update editable settings for the basic settings page."""
+    row = _get_or_create_editable_settings(db)
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        if value is None:
+            continue
+        if isinstance(value, str):
+            value = value.strip()
+        if key == "backup_retention_days":
+            value = max(1, min(365, int(value)))
+        setattr(row, key, value)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row

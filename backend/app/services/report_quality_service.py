@@ -41,38 +41,50 @@ class ReportQualityService:
             issues.append(f"画布仅填写 {filled}/9 模块，完整度不足。")
             suggestions.append("补全缺失的画布模块以提升诊断可靠性。")
 
-        # 2. methodology_alignment：引用的方法论节点覆盖度
+        # 2. methodology_alignment：报告是否真的「援引」了路由到的方法论节点
+        #    （旧实现用 node_ids/routed，分子分母同源恒等 1.0，是假信号；改为统计正文实际点名）
         node_ids = report_payload.get("methodology_node_ids", [])
-        routed = len(context.nodes) or 1
-        scores["methodology_alignment"] = round(min(len(node_ids) / routed, 1.0), 4)
+        report_text = _report_text(report_payload)
+        routed_names = [
+            n.node_name for n in context.nodes if getattr(n, "node_name", "")
+        ]
+        cited = sum(1 for name in routed_names if name and name in report_text)
+        if not routed_names:
+            scores["methodology_alignment"] = 0.0
+        else:
+            expected = min(len(routed_names), 5)  # 引用到 5 个相关节点即视为充分对齐
+            scores["methodology_alignment"] = round(min(cited / expected, 1.0), 4)
         if not node_ids:
             issues.append("报告未对齐任何核心方法论节点。")
             suggestions.append("确保诊断结论锚定核心方法论判断。")
+        elif cited == 0:
+            issues.append("报告未在结论中显式援引方法论节点，方法论契合度偏低。")
+            suggestions.append("在分析中点名引用相关方法论（如「依据『价值主张画布』…」）。")
 
-        # 3. assumption
+        # 3. assumption：数量 × 论述深度
         assumptions = report_payload.get("key_assumptions", [])
-        scores["assumption"] = _ramp(len(assumptions), good=2)
+        scores["assumption"] = _depth_score(assumptions, good_count=5, good_len=40)
         if not assumptions:
             issues.append("未列出关键假设。")
             suggestions.append("显式列出诊断所依赖的关键假设。")
 
-        # 4. risk
+        # 4. risk：数量 × 论述深度（鼓励写明影响/严重度/缓解）
         risks = report_payload.get("risks", [])
-        scores["risk"] = _ramp(len(risks), good=2)
+        scores["risk"] = _depth_score(risks, good_count=4, good_len=34)
         if not risks:
             issues.append("未识别风险。")
             suggestions.append("补充关键风险与触发条件。")
 
-        # 5. actionability
+        # 5. actionability：数量 × 论述深度（鼓励写明怎么验证/成功判据）
         actions = report_payload.get("recommended_actions", [])
-        scores["actionability"] = _ramp(len(actions), good=2)
+        scores["actionability"] = _depth_score(actions, good_count=4, good_len=34)
         if not actions:
             issues.append("缺少可执行的下一步建议。")
             suggestions.append("给出可验证、可落地的下一步动作。")
 
-        # 6. evidence
+        # 6. evidence：引用条数（结构化引用，按数量评估即可）
         evidence = report_payload.get("evidence_refs", [])
-        scores["evidence"] = _ramp(len(evidence), good=3)
+        scores["evidence"] = _ramp(len(evidence), good=5)
         if not evidence:
             issues.append("缺少证据引用。")
             suggestions.append("引用方法论节点或已审核扩展作为证据。")
@@ -134,3 +146,19 @@ def _ramp(count: int, good: int) -> float:
     if count <= 0:
         return 0.0
     return round(min(count / good, 1.0), 4)
+
+
+def _depth_score(items: list, good_count: int, good_len: int) -> float:
+    """数量充分度 × 论述深度的混合分：
+
+    - 数量：达到 good_count 条得满；
+    - 深度：各条平均字数达到 good_len 得满；
+    各占一半。避免「凑够条数即满分」，让单薄的报告得分更低、真实可区分。
+    """
+    cleaned = [str(x).strip() for x in (items or []) if str(x).strip()]
+    if not cleaned:
+        return 0.0
+    qty = min(len(cleaned) / good_count, 1.0)
+    avg_len = sum(len(x) for x in cleaned) / len(cleaned)
+    depth = min(avg_len / good_len, 1.0)
+    return round(0.5 * qty + 0.5 * depth, 4)
