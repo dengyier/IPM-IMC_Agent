@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { Card } from "@/components/card";
 import { Icon } from "@/components/icon";
-import { RightPanel } from "@/components/right-panel";
 import { cn } from "@/lib/utils";
 import {
   nodesApi,
@@ -128,9 +127,6 @@ export function KnowledgeNodesPage() {
           onPageChange={setPage}
         />
       </section>
-      <aside className="flex h-screen shrink-0 border-l border-line/70 bg-white/30 px-4 py-6 backdrop-blur-xl">
-        <RightPanel />
-      </aside>
       {selectedNode && (
         <NodeDetailDrawer
           node={selectedNode}
