@@ -7,7 +7,7 @@
 - 文件上传与解析：支持 `PDF`、`DOCX`、`TXT`、`MD`、`PPTX`
 - 文档清洗、分块、Embedding 与向量入库
 - 知识节点候选抽取与人工审核
-- 商业画布九宫格诊断与 Markdown 报告生成
+- 商业画布九宫格深度诊断与结构化报告生成
 - 同学笔记匹配、增量观点提取与审核任务生成
 
 ## 项目结构
@@ -34,7 +34,8 @@ docker compose up --build
 
 3. 打开：
 
-- 后端 API：http://localhost:8000/docs
+- 前端工作台：http://localhost:13005
+- 后端 API：http://localhost:18005/docs
 - Qdrant：http://localhost:6333/dashboard
 - MinIO Console：http://localhost:9001
 
@@ -49,7 +50,15 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --host 127.0.0.1 --port 18005
+```
+
+前端：
+
+```bash
+cd frontend
+npm install
+npm run dev
 ```
 
 ## 核心原则

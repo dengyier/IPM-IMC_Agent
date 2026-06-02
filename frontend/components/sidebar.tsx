@@ -6,12 +6,11 @@ import { cn } from "@/lib/utils";
 import { navItems } from "@/lib/data";
 import { dashboardApi, type DashboardSummary } from "@/lib/api";
 import { fmtNum } from "@/lib/presentation";
-import { useAuth } from "./auth-context";
+import { UserAccountMenu } from "./user-account-menu";
 
 export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState(false);
-  const { user, logout } = useAuth();
 
   useEffect(() => {
     let cancelled = false;
@@ -97,19 +96,14 @@ export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
       </div>
 
       {/* User */}
-      <button
-        type="button"
-        onClick={() => logout()}
-        className="mt-auto flex items-center gap-2.5 border-t border-line px-4 py-4 text-left transition-colors hover:bg-slate-50"
-        title="退出登录"
-      >
-        <div className="h-9 w-9 overflow-hidden rounded-full bg-[radial-gradient(circle_at_50%_28%,#f8d5c2_0_18%,#233a70_19%_46%,#111827_47%)] ring-4 ring-slate-50" />
-        <div className="leading-tight">
-          <div className="text-[13px] font-semibold text-ink">{user?.display_name || "未登录"}</div>
-          <div className="text-[11px] text-gray-400">{user?.role || "访客"}</div>
-        </div>
-        <Icon name="chevron-down" className="ml-auto h-4 w-4 text-gray-300" />
-      </button>
+      <div className="mt-auto border-t border-line">
+        <UserAccountMenu
+          placement="top-start"
+          className="w-full rounded-none px-4 py-4 hover:bg-slate-50"
+          avatarClassName="h-9 w-9 overflow-hidden ring-slate-50"
+          chevronClassName="ml-auto"
+        />
+      </div>
     </aside>
   );
 }

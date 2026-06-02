@@ -1,8 +1,8 @@
 // 统一 API 客户端。后端成功返回裸数据 / {items,total}；错误返回 {error:{code,detail}}。
-// base url 由 NEXT_PUBLIC_API_BASE 注入（见 .env.local），默认本地 8000。
+// base url 由 NEXT_PUBLIC_API_BASE 注入（见 .env.local），默认本地 18005。
 
 export const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://localhost:8000";
+  process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://localhost:18005";
 
 export class ApiError extends Error {
   code: string;

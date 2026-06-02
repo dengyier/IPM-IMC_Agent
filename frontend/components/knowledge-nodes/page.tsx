@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { Card } from "@/components/card";
 import { Icon } from "@/components/icon";
-import { useAuth } from "@/components/auth-context";
 import { cn } from "@/lib/utils";
 import {
   nodesApi,
@@ -165,8 +164,6 @@ function KnowledgeHeader({ total }: { total: number }) {
 }
 
 function TopActions() {
-  const { user, logout } = useAuth();
-
   return (
     <div className="flex shrink-0 items-center gap-5">
       <button className="relative flex h-10 w-10 items-center justify-center rounded-full text-[#172452] hover:bg-white">
@@ -174,19 +171,6 @@ function TopActions() {
         <span className="absolute right-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold text-white ring-2 ring-white">
           8
         </span>
-      </button>
-      <button
-        type="button"
-        onClick={() => logout()}
-        className="flex items-center gap-3 rounded-2xl py-1 pl-2 pr-2 text-left hover:bg-white"
-        title="退出登录"
-      >
-        <div className="h-10 w-10 rounded-full bg-[radial-gradient(circle_at_50%_28%,#f8d5c2_0_18%,#233a70_19%_46%,#111827_47%)] ring-4 ring-white" />
-        <div className="leading-tight">
-          <div className="text-[13px] font-bold text-ink">{user?.display_name || "用户"}</div>
-          <div className="text-[11px] text-slate-400">{user?.role || "访客"}</div>
-        </div>
-        <Icon name="chevron-down" className="h-4 w-4 text-slate-400" />
       </button>
     </div>
   );
