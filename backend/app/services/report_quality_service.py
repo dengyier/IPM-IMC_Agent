@@ -2,8 +2,7 @@
 
 评分公式::
 
-    score = 0.20·canvas_completeness + 0.20·methodology_alignment + 0.15·assumption
-          + 0.15·risk + 0.15·actionability + 0.10·evidence + 0.05·safety
+    score = 基础质量维度 + consulting_structure（深度报告结构完整度）+ safety
 
 其中 safety 检查报告是否泄露了核心方法论切块原文——一旦泄露，safety=0 并强制不通过。
 """
@@ -14,12 +13,13 @@ from app.schemas.diagnosis import CANVAS_MODULES
 from app.services.context_fusion_service import FusedContext
 
 WEIGHTS = {
-    "canvas_completeness": 0.20,
-    "methodology_alignment": 0.20,
-    "assumption": 0.15,
-    "risk": 0.15,
-    "actionability": 0.15,
+    "canvas_completeness": 0.15,
+    "methodology_alignment": 0.18,
+    "assumption": 0.12,
+    "risk": 0.12,
+    "actionability": 0.13,
     "evidence": 0.10,
+    "consulting_structure": 0.15,
     "safety": 0.05,
 }
 
@@ -90,6 +90,32 @@ class ReportQualityService:
             suggestions.append("引用方法论节点或已审核扩展作为证据。")
 
         # 7. safety：报告不得泄露核心切块原文
+        required_sections = [
+            ("executive_summary", "执行摘要"),
+            ("core_tensions", "核心矛盾"),
+            ("cross_canvas_logic", "交叉画布逻辑"),
+            ("unit_economics", "单位经济模型"),
+            ("risk_matrix", "风险矩阵"),
+            ("mvp_validation_path", "MVP 验证路径"),
+            ("ninety_day_plan", "90 天行动计划"),
+            ("final_recommendation", "最终决策建议"),
+        ]
+        present = 0
+        for key, label in required_sections:
+            value = report_payload.get(key)
+            if value:
+                present += 1
+            else:
+                issues.append(f"缺少{label}。")
+                suggestions.append(f"补充{label}以达到咨询式深度报告要求。")
+        rich_modules = 0
+        for finding in (report_payload.get("module_findings") or {}).values():
+            if isinstance(finding, dict) and finding.get("business_impact") and finding.get("hypotheses_to_validate"):
+                rich_modules += 1
+        structure_score = 0.7 * (present / len(required_sections)) + 0.3 * (rich_modules / len(CANVAS_MODULES))
+        scores["consulting_structure"] = round(structure_score, 4)
+
+        # 8. safety：报告不得泄露核心切块原文
         leaked = self._detect_core_leak(report_payload, context)
         scores["safety"] = 0.0 if leaked else 1.0
         if leaked:
@@ -133,11 +159,30 @@ def _report_text(payload: dict) -> str:
     parts.extend(payload.get("key_assumptions", []))
     parts.extend(payload.get("risks", []))
     parts.extend(payload.get("recommended_actions", []))
+    for key in (
+        "executive_summary",
+        "core_tensions",
+        "cross_canvas_logic",
+        "unit_economics",
+        "risk_matrix",
+        "mvp_validation_path",
+        "ninety_day_plan",
+        "final_recommendation",
+    ):
+        parts.append(payload.get(key, ""))
     for finding in (payload.get("module_findings") or {}).values():
         if isinstance(finding, dict):
             parts.append(finding.get("assessment", ""))
             parts.extend(finding.get("issues", []))
             parts.extend(finding.get("suggestions", []))
+            parts.append(finding.get("current_judgement", ""))
+            parts.extend(finding.get("evidence_and_observations", []))
+            parts.extend(finding.get("key_issues", []))
+            parts.append(finding.get("business_impact", ""))
+            parts.extend(finding.get("hypotheses_to_validate", []))
+            parts.extend(finding.get("recommended_actions", []))
+            parts.extend(finding.get("metrics_to_track", []))
+            parts.extend(finding.get("methodology_basis", []))
     return "\n".join(str(p) for p in parts)
 
 

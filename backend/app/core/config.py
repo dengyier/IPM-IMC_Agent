@@ -19,7 +19,20 @@ class Settings(BaseSettings):
     # DeepSeek（OpenAI 兼容）
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-chat"
+    deepseek_model: str = "deepseek-v4-pro"
+
+    # 腾讯云短信验证码
+    tencentcloud_secret_id: str | None = None
+    tencentcloud_secret_key: str | None = None
+    tencentcloud_region: str = "ap-guangzhou"
+    tencentsms_sdk_app_id: str | None = None
+    tencentsms_sign_name: str | None = None
+    tencentsms_template_id: str | None = None
+    tencentsms_template_param_count: int = 1
+    sms_code_ttl_seconds: int = 300
+    sms_code_send_interval_seconds: int = 60
+    sms_code_max_attempts: int = 5
+    auth_session_ttl_days: int = 30
 
     # Embedding 可插拔
     embedding_provider: str = "local"  # local | openai

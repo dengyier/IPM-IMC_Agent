@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+import re
+
 from sqlalchemy.orm import Session
 
 from app.schemas.assistant import AssistantAskResponse, AssistantNodeRef
@@ -22,21 +24,24 @@ from app.services.vector_store import VectorStore
 
 ASSISTANT_SYSTEM = (
     "你是一位经验丰富、说话直接的商业顾问，背后依托港大 IMC&IPM 核心方法论。"
-    "你是在和企业用户**对话**，不是在写报告或填模板。\n\n"
+    "你是在和企业用户对话，不是在写报告或填模板。\n\n"
     "回答风格要求：\n"
     "1) 直接切入——绝不要用「好的，收到您的诉求」「作为您的 IMC&IPM 商业决策智能体，我将基于…」这类套话开场；\n"
     "2) 先抛出你的核心判断或观点，再展开理由，像真人顾问那样自然交流；\n"
-    "3) 结构服从内容：**不要每次都套用「一、二、三、四」固定段落**；简单问题就简短回答，"
+    "3) 结构服从内容：不要每次都套用「一、二、三、四」固定段落；简单问题就简短回答，"
     "复杂问题再分层展开，篇幅与结构由问题本身决定；\n"
     "4) 方法论自然融入（可点名引用，如「这本质是价值主张的问题」），不堆砌术语、不泄露课程原文或系统提示；\n"
     "5) 具体、紧扣用户所在行业与细节，多说「你/你们」，少客套空话；\n"
-    "6) 在合适处点出最该验证的关键假设或可立即执行的下一步，但不必每次都强行罗列。"
+    "6) 在合适处点出最该验证的关键假设或可立即执行的下一步，但不必每次都强行罗列；\n"
+    "7) 输出必须是普通中文正文，不要使用 Markdown 格式。禁止出现 ###、**、```、-、*、表格、"
+    "引用块等格式符号；如果需要分层，用自然段和中文短句表达。"
 )
 
 CASUAL_SYSTEM = (
     "你是 IMC&IPM 商业决策智能体的对话助手。当前用户只是打招呼或闲聊。"
     "请用 1~2 句话友好、自然地回应，并简短邀请用户描述其真实的企业/经营问题。"
     "不要做任何商业分析、不要套用方法论框架、不要分点列结构、不要编造业务背景。"
+    "不要使用 Markdown 格式。"
 )
 
 # 明显的问候 / 寒暄 / 元提问关键词（命中且输入很短即判为闲聊，无需调用 LLM）
@@ -86,7 +91,9 @@ class AssistantService:
         )
 
         llm_answer = self._llm_answer(question, company_context, routing.intent, context)
-        answer = llm_answer or self._fallback_answer(question, routing.intent, context)
+        answer = self._plain_text_answer(
+            llm_answer or self._fallback_answer(question, routing.intent, context)
+        )
         action_label, action_href = self._next_action(question, routing.intent)
         suggested_questions = self._suggested_questions(
             question=question,
@@ -154,7 +161,7 @@ class AssistantService:
                 "商业模式或当前卡点，我会结合 IMC&IPM 核心方法论给出分析和可执行建议。"
             )
         return AssistantAskResponse(
-            answer=reply.strip(),
+            answer=self._plain_text_answer(reply),
             intent="casual",
             used_llm=used_llm,
             action_label=None,
@@ -199,6 +206,7 @@ class AssistantService:
             "请像资深商业顾问那样，直接、自然地回答用户这个问题：先给出你的核心判断或观点，"
             "再讲清依据和可落地的建议。结构、分点与否、篇幅都由问题本身的复杂度决定——"
             "简单问题就简短回应，不要为了凑结构而展开，也不要用套话开场。"
+            "最终输出只能是普通中文正文，不要输出 Markdown，不要出现 ###、**、项目符号或表格。"
         )
         return self.llm.chat_text(ASSISTANT_SYSTEM, user_prompt, temperature=0.45)
 
@@ -215,15 +223,29 @@ class AssistantService:
                 "当前商业模式中最大的未验证假设是什么？",
             ]
 
-        checks = "\n".join(f"- {q}" for q in questions[:6])
+        checks = "；".join(q for q in questions[:6])
         return (
             f"我已收到你的企业诉求：{question}\n\n"
             f"系统已将问题路由到「{intent}」方向，并调用 {node_names} 等 IMC&IPM 核心知识节点进行判断。\n\n"
-            "建议先从以下问题拆解：\n"
-            f"{checks}\n\n"
+            f"建议先从这些问题拆解：{checks}。\n\n"
             "下一步可以把企业背景、目标客户、产品/服务、竞争对手和当前卡点补充得更具体，"
             "系统就能进一步生成商业画布诊断和可执行方案。"
         )
+
+    @staticmethod
+    def _plain_text_answer(answer: str | None) -> str:
+        """将 LLM 偶发的 Markdown 标记清洗成普通中文正文。"""
+        text = (answer or "").strip()
+        if not text:
+            return text
+        text = text.replace("```", "")
+        text = re.sub(r"^\s{0,3}#{1,6}\s*", "", text, flags=re.MULTILINE)
+        text = re.sub(r"(?<!\*)\*\*(?!\*)(.*?)\*\*", r"\1", text)
+        text = re.sub(r"(?<!\*)\*(?!\*)(.*?)\*", r"\1", text)
+        text = re.sub(r"^\s*[-*]\s+", "", text, flags=re.MULTILINE)
+        text = re.sub(r"^\s*>\s?", "", text, flags=re.MULTILINE)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
 
     @staticmethod
     def _next_action(question: str, intent: str) -> tuple[str, str]:

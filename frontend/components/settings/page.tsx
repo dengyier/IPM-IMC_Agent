@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { Card } from "@/components/card";
 import { Icon } from "@/components/icon";
+import { useAuth } from "@/components/auth-context";
 import { ApiError, EditableSystemSettings, systemApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -195,6 +196,8 @@ export function SettingsPage() {
 }
 
 function SettingsHeader() {
+  const { user, logout } = useAuth();
+
   return (
     <header className="flex items-center justify-between gap-6 px-8 pt-6">
       <div>
@@ -220,12 +223,19 @@ function SettingsHeader() {
         <button className="flex h-10 w-10 items-center justify-center rounded-full text-[#172452] hover:bg-white">
           <Icon name="help-circle" className="h-[19px] w-[19px]" />
         </button>
-        <div className="h-9 w-9 rounded-full bg-[radial-gradient(circle_at_50%_28%,#f8d5c2_0_18%,#233a70_19%_46%,#111827_47%)] ring-4 ring-white" />
-        <div className="leading-tight">
-          <div className="text-[13px] font-bold text-ink">张晓明</div>
-          <div className="text-[11px] text-slate-400">管理员</div>
-        </div>
-        <Icon name="chevron-down" className="h-4 w-4 text-slate-400" />
+        <button
+          type="button"
+          onClick={() => logout()}
+          className="flex items-center gap-3 rounded-2xl py-1 pl-2 pr-2 text-left hover:bg-white"
+          title="退出登录"
+        >
+          <div className="h-9 w-9 rounded-full bg-[radial-gradient(circle_at_50%_28%,#f8d5c2_0_18%,#233a70_19%_46%,#111827_47%)] ring-4 ring-white" />
+          <div className="leading-tight">
+            <div className="text-[13px] font-bold text-ink">{user?.display_name || "用户"}</div>
+            <div className="text-[11px] text-slate-400">{user?.role || "访客"}</div>
+          </div>
+          <Icon name="chevron-down" className="h-4 w-4 text-slate-400" />
+        </button>
       </div>
     </header>
   );
@@ -648,6 +658,8 @@ function SettingsFooter() {
 }
 
 function SettingsAssistant() {
+  const { user } = useAuth();
+
   return (
     <aside className="flex w-[336px] shrink-0 flex-col gap-5 overflow-y-auto border-l border-line/70 bg-white/50 px-4 py-6 backdrop-blur-xl">
       <Card className="px-5 py-5">
@@ -666,7 +678,7 @@ function SettingsAssistant() {
         </div>
 
         <p className="mt-6 flex items-center gap-1.5 text-[14px] font-bold text-ink">
-          <span>👋</span> 你好，张晓明 <span>👋</span>
+          <span>👋</span> 你好，{user?.display_name || "用户"} <span>👋</span>
         </p>
         <p className="mt-3 text-[13px] font-semibold leading-6 text-[#172452]">我可以帮助你：</p>
         <ul className="mt-3 space-y-2.5 text-[12.5px] font-semibold leading-6 text-slate-600">

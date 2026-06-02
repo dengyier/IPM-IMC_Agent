@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 
 import { Card } from "@/components/card";
 import { Icon } from "@/components/icon";
@@ -31,7 +32,63 @@ type ModuleFinding = {
   assessment?: string;
   issues?: string[];
   suggestions?: string[];
+  current_judgement?: string;
+  evidence_and_observations?: string[];
+  key_issues?: string[];
+  business_impact?: string;
+  hypotheses_to_validate?: string[];
+  recommended_actions?: string[];
+  metrics_to_track?: string[];
+  methodology_basis?: string[];
+  confidence?: number | null;
 };
+
+type RiskRow = {
+  risk?: string;
+  impact?: string;
+  probability?: string;
+  severity?: string;
+  mitigation?: string;
+  validation_method?: string;
+};
+
+type RoadmapStage = {
+  stage?: string;
+  objective?: string;
+  actions?: string[];
+  success_criteria?: string[];
+  duration?: string;
+};
+
+function asText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  if (Array.isArray(value)) return value.map(asText).filter(Boolean).join("；");
+  if (value && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const preferred = ["risk", "tension", "logic_chain", "objective", "action", "recommendation", "assumption", "finding", "title", "stage"];
+    const parts = preferred.map((key) => asText(obj[key])).filter(Boolean);
+    if (parts.length > 0) return parts.slice(0, 4).join("；");
+    return Object.values(obj).map(asText).filter(Boolean).slice(0, 4).join("；");
+  }
+  return "";
+}
+
+function asList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((v) => asText(v)).filter(Boolean);
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function asObjectList<T>(value: unknown): T[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((v) => v && typeof v === "object" && !Array.isArray(v)) as T[];
+}
 
 export function ReportsPage({ initialReportId = null }: { initialReportId?: string | null }) {
   const [reports, setReports] = useState<DiagnosisReport[]>([]);
@@ -424,6 +481,14 @@ function ReportDetail({
     dot: "bg-slate-400",
   };
   const moduleEntries = Object.entries(report.module_findings ?? {}) as [string, ModuleFinding][];
+  const executiveSummary = asObject(report.executive_summary);
+  const coreTensions = asObjectList<Record<string, unknown>>(report.core_tensions);
+  const crossCanvasLogic = asObjectList<Record<string, unknown>>(report.cross_canvas_logic);
+  const unitEconomics = asObject(report.unit_economics);
+  const riskMatrix = asObjectList<RiskRow>(report.risk_matrix);
+  const mvpPath = asObjectList<RoadmapStage>(report.mvp_validation_path);
+  const ninetyDayPlan = asObject(report.ninety_day_plan);
+  const finalRecommendation = asObject(report.final_recommendation);
 
   return (
     <Card className="flex min-w-0 flex-col overflow-hidden">
@@ -462,6 +527,7 @@ function ReportDetail({
           <span>创建时间：<span className="text-[#172452]">{fmtTime(report.created_at)}</span></span>
           <span>方法论引用：<span className="text-[#172452]">{report.methodology_node_ids.length} 个节点</span></span>
           <span>引擎：<span className="text-[#172452]">{report.used_llm ? "LLM" : "本地回退"}</span></span>
+          <span>报告深度：<span className="text-[#172452]">{report.report_depth || "consulting"}</span></span>
         </div>
         {actionMsg && <p className="mt-3 text-[12px] font-semibold text-brand">{actionMsg}</p>}
       </div>
@@ -481,6 +547,9 @@ function ReportDetail({
           )}
         </div>
 
+        <ExecutiveSummarySection summary={executiveSummary} />
+        <CoreTensionsSection items={coreTensions} />
+
         {/* 商业画布诊断 */}
         {moduleEntries.length > 0 && (
           <>
@@ -492,6 +561,13 @@ function ReportDetail({
             </div>
           </>
         )}
+
+        <CrossCanvasSection items={crossCanvasLogic} />
+        <UnitEconomicsSection data={unitEconomics} />
+        <RiskMatrixSection items={riskMatrix} />
+        <RoadmapSection items={mvpPath} />
+        <NinetyDayPlanSection data={ninetyDayPlan} />
+        <FinalRecommendationSection data={finalRecommendation} />
 
         {/* 关键假设 */}
         <ListSection
@@ -521,6 +597,9 @@ function ReportDetail({
 }
 
 function ModuleCard({ moduleKey, finding }: { moduleKey: string; finding: ModuleFinding }) {
+  const evidence = finding.evidence_and_observations ?? [];
+  const keyIssues = finding.key_issues?.length ? finding.key_issues : finding.issues ?? [];
+  const actions = finding.recommended_actions?.length ? finding.recommended_actions : finding.suggestions ?? [];
   return (
     <div className="rounded-2xl border border-line bg-white px-5 py-4">
       <div className="flex items-center gap-2">
@@ -528,40 +607,260 @@ function ModuleCard({ moduleKey, finding }: { moduleKey: string; finding: Module
           <Icon name="layers" className="h-4 w-4" />
         </span>
         <h4 className="text-[14px] font-black text-ink">{moduleLabel(moduleKey)}</h4>
+        {typeof finding.confidence === "number" && (
+          <span className="ml-auto rounded-full bg-[#f8faff] px-2 py-0.5 text-[11px] font-bold text-slate-500">
+            置信度 {Math.round(finding.confidence * 100)}%
+          </span>
+        )}
       </div>
-      {finding.assessment && (
-        <p className="mt-2.5 text-[13px] font-medium leading-6 text-[#3b4a6b]">{finding.assessment}</p>
+      {(finding.current_judgement || finding.assessment) && (
+        <p className="mt-2.5 text-[13px] font-medium leading-6 text-[#3b4a6b]">
+          {finding.current_judgement || finding.assessment}
+        </p>
       )}
-      {finding.issues && finding.issues.length > 0 && (
-        <div className="mt-3">
-          <div className="text-[12px] font-bold text-orange-500">问题</div>
-          <ul className="mt-1.5 space-y-1 text-[12.5px] font-medium leading-5 text-[#3b4a6b]">
-            {finding.issues.map((i, idx) => (
-              <li key={idx} className="flex gap-2">
-                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-orange-400" />
-                {i}
-              </li>
-            ))}
-          </ul>
-        </div>
+      {finding.business_impact && (
+        <p className="mt-3 rounded-xl bg-[#f8faff] px-3 py-2.5 text-[12.5px] font-medium leading-6 text-[#3b4a6b]">
+          <span className="font-bold text-[#172452]">商业影响：</span>
+          {finding.business_impact}
+        </p>
       )}
-      {finding.suggestions && finding.suggestions.length > 0 && (
-        <div className="mt-3">
-          <div className="text-[12px] font-bold text-emerald-600">建议</div>
-          <ul className="mt-1.5 space-y-1 text-[12.5px] font-medium leading-5 text-[#3b4a6b]">
-            {finding.suggestions.map((s, idx) => (
-              <li key={idx} className="flex gap-2">
-                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-emerald-400" />
-                {s}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <MiniList title="依据与观察" tone="bg-blue-50 text-blue-600" items={evidence} />
+        <MiniList title="关键问题" tone="bg-orange-50 text-orange-500" items={keyIssues} />
+        <MiniList title="待验证假设" tone="bg-violet-50 text-violet" items={finding.hypotheses_to_validate ?? []} />
+        <MiniList title="建议动作" tone="bg-emerald-50 text-emerald-600" items={actions} />
+        <MiniList title="关键指标" tone="bg-slate-100 text-slate-600" items={finding.metrics_to_track ?? []} />
+        <MiniList title="方法论依据" tone="bg-[#f0edff] text-brand" items={finding.methodology_basis ?? []} />
+      </div>
     </div>
   );
 }
 
+function ExecutiveSummarySection({ summary }: { summary: Record<string, unknown> }) {
+  if (Object.keys(summary).length === 0) return null;
+  const findings = asList(summary.top_3_findings);
+  const risks = asList(summary.top_3_risks);
+  return (
+    <section className="mt-7 rounded-2xl border border-line bg-white px-5 py-4">
+      <div className="flex items-center gap-2">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#f0edff] text-brand">
+          <Icon name="sparkles" className="h-4 w-4" />
+        </span>
+        <h3 className="text-[15px] font-black text-ink">执行摘要</h3>
+        {summary.overall_score !== undefined && (
+          <span className="ml-auto rounded-full bg-[#f8faff] px-2.5 py-1 text-[11px] font-bold text-slate-500">
+            综合判断 {Math.round(Number(summary.overall_score) * 100)}%
+          </span>
+        )}
+      </div>
+      <p className="mt-3 text-[14px] font-black leading-7 text-[#172452]">
+        {asText(summary.one_sentence_judgement)}
+      </p>
+      <div className="mt-3 grid gap-3 xl:grid-cols-3">
+        <SummaryBox label="成熟阶段" value={asText(summary.maturity_stage)} />
+        <SummaryBox label="建议决策" value={asText(summary.recommended_decision)} wide />
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <MiniList title="核心结论" tone="bg-emerald-50 text-emerald-600" items={findings} />
+        <MiniList title="最高风险" tone="bg-orange-50 text-orange-500" items={risks} />
+      </div>
+    </section>
+  );
+}
+
+function SummaryBox({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {
+  if (!value) return null;
+  return (
+    <div className={cn("rounded-xl bg-[#f8faff] px-4 py-3", wide && "xl:col-span-2")}>
+      <div className="text-[11px] font-bold text-slate-400">{label}</div>
+      <div className="mt-1 text-[13px] font-bold leading-6 text-[#172452]">{value}</div>
+    </div>
+  );
+}
+
+function CoreTensionsSection({ items }: { items: Record<string, unknown>[] }) {
+  if (items.length === 0) return null;
+  return (
+    <RichCardSection title="核心矛盾识别" icon="target">
+      <div className="grid gap-3 lg:grid-cols-3">
+        {items.map((item, idx) => (
+          <div key={idx} className="rounded-xl border border-line bg-[#fbfcff] px-4 py-3">
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-[#f0edff] px-2 py-0.5 text-[11px] font-black text-brand">
+                {asText(item.priority) || "priority"}
+              </span>
+            </div>
+            <div className="mt-2 text-[13px] font-black leading-6 text-[#172452]">{asText(item.tension)}</div>
+            <p className="mt-2 text-[12.5px] font-medium leading-6 text-[#3b4a6b]">{asText(item.why_it_matters)}</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {asList(item.affected_canvas_modules).map((m) => (
+                <span key={m} className="rounded-md bg-white px-2 py-1 text-[11px] font-bold text-slate-500">
+                  {moduleLabel(m)}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </RichCardSection>
+  );
+}
+
+function CrossCanvasSection({ items }: { items: Record<string, unknown>[] }) {
+  if (items.length === 0) return null;
+  return (
+    <RichCardSection title="商业闭环与交叉推理" icon="git-branch">
+      <div className="space-y-3">
+        {items.map((item, idx) => (
+          <div key={idx} className="rounded-xl bg-[#f8faff] px-4 py-3">
+            <div className="text-[13px] font-black leading-6 text-brand">{asText(item.logic_chain)}</div>
+            <p className="mt-1.5 text-[12.5px] font-medium leading-6 text-[#3b4a6b]">{asText(item.explanation)}</p>
+          </div>
+        ))}
+      </div>
+    </RichCardSection>
+  );
+}
+
+function UnitEconomicsSection({ data }: { data: Record<string, unknown> }) {
+  if (Object.keys(data).length === 0) return null;
+  return (
+    <RichCardSection title="单位经济模型测算框架" icon="money">
+      <div className="grid gap-3 lg:grid-cols-2">
+        <MiniList title="收入项" tone="bg-emerald-50 text-emerald-600" items={asList(data.revenue_items)} />
+        <MiniList title="成本项" tone="bg-orange-50 text-orange-500" items={asList(data.cost_items)} />
+        <MiniList title="毛利假设" tone="bg-blue-50 text-blue-600" items={asList(data.gross_margin_assumptions)} />
+        <MiniList title="缺失数据" tone="bg-slate-100 text-slate-600" items={asList(data.missing_data)} />
+      </div>
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <TextPanel label="CAC / LTV 框架" value={asText(data.cac_ltv_framework)} />
+        <TextPanel label="盈亏平衡逻辑" value={asText(data.break_even_logic)} />
+      </div>
+    </RichCardSection>
+  );
+}
+
+function RiskMatrixSection({ items }: { items: RiskRow[] }) {
+  if (items.length === 0) return null;
+  return (
+    <RichCardSection title="风险矩阵" icon="alert">
+      <div className="overflow-hidden rounded-xl border border-line">
+        <div className="grid grid-cols-[1.2fr_0.45fr_0.45fr_0.45fr_1fr_1fr] bg-[#f8faff] px-3 py-2 text-[11px] font-black text-slate-500">
+          <span>风险</span><span>影响</span><span>概率</span><span>等级</span><span>缓释动作</span><span>验证方式</span>
+        </div>
+        {items.map((r, idx) => (
+          <div key={idx} className="grid grid-cols-[1.2fr_0.45fr_0.45fr_0.45fr_1fr_1fr] gap-2 border-t border-line px-3 py-3 text-[12px] font-medium leading-5 text-[#3b4a6b]">
+            <span className="font-bold text-[#172452]">{r.risk}</span>
+            <span>{r.impact}</span>
+            <span>{r.probability}</span>
+            <span className="font-bold text-orange-500">{r.severity}</span>
+            <span>{r.mitigation}</span>
+            <span>{r.validation_method}</span>
+          </div>
+        ))}
+      </div>
+    </RichCardSection>
+  );
+}
+
+function RoadmapSection({ items }: { items: RoadmapStage[] }) {
+  if (items.length === 0) return null;
+  return (
+    <RichCardSection title="MVP 最小验证路径" icon="route">
+      <div className="grid gap-3 lg:grid-cols-3">
+        {items.map((stage, idx) => (
+          <div key={idx} className="rounded-xl border border-line bg-[#fbfcff] px-4 py-3">
+            <div className="text-[12px] font-bold text-brand">{stage.duration}</div>
+            <div className="mt-1 text-[14px] font-black text-[#172452]">{stage.stage}</div>
+            <p className="mt-2 text-[12.5px] font-medium leading-6 text-[#3b4a6b]">{stage.objective}</p>
+            <MiniList title="动作" tone="bg-white text-slate-600" items={stage.actions ?? []} compact />
+            <MiniList title="成功标准" tone="bg-emerald-50 text-emerald-600" items={stage.success_criteria ?? []} compact />
+          </div>
+        ))}
+      </div>
+    </RichCardSection>
+  );
+}
+
+function NinetyDayPlanSection({ data }: { data: Record<string, unknown> }) {
+  if (Object.keys(data).length === 0) return null;
+  return (
+    <RichCardSection title="90 天行动计划" icon="calendar">
+      <div className="grid gap-3 lg:grid-cols-3">
+        <MiniList title="0-30 天" tone="bg-violet-50 text-violet" items={asList(data.day_0_30)} />
+        <MiniList title="31-60 天" tone="bg-blue-50 text-blue-600" items={asList(data.day_31_60)} />
+        <MiniList title="61-90 天" tone="bg-emerald-50 text-emerald-600" items={asList(data.day_61_90)} />
+      </div>
+    </RichCardSection>
+  );
+}
+
+function FinalRecommendationSection({ data }: { data: Record<string, unknown> }) {
+  if (Object.keys(data).length === 0) return null;
+  return (
+    <RichCardSection title="最终决策建议" icon="check-circle">
+      <p className="rounded-xl bg-[#f8faff] px-4 py-3 text-[13px] font-bold leading-7 text-[#172452]">
+        {asText(data.final_judgement)}
+      </p>
+      <div className="mt-3 grid gap-3 lg:grid-cols-3">
+        <MiniList title="继续推进条件" tone="bg-emerald-50 text-emerald-600" items={asList(data.go_conditions)} />
+        <MiniList title="暂缓条件" tone="bg-orange-50 text-orange-500" items={asList(data.pause_conditions)} />
+        <MiniList title="需补充信息" tone="bg-slate-100 text-slate-600" items={asList(data.missing_information)} />
+      </div>
+    </RichCardSection>
+  );
+}
+
+function RichCardSection({ title, icon, children }: { title: string; icon: string; children: ReactNode }) {
+  return (
+    <section className="mt-7 rounded-2xl border border-line bg-white px-5 py-4">
+      <h3 className="flex items-center gap-2 text-[15px] font-black text-ink">
+        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#f0edff] text-brand">
+          <Icon name={icon} className="h-4 w-4" />
+        </span>
+        {title}
+      </h3>
+      <div className="mt-4">{children}</div>
+    </section>
+  );
+}
+
+function TextPanel({ label, value }: { label: string; value: string }) {
+  if (!value) return null;
+  return (
+    <div className="rounded-xl bg-[#f8faff] px-4 py-3">
+      <div className="text-[12px] font-bold text-slate-400">{label}</div>
+      <p className="mt-1 text-[12.5px] font-medium leading-6 text-[#3b4a6b]">{value}</p>
+    </div>
+  );
+}
+
+function MiniList({
+  title,
+  tone,
+  items,
+  compact = false,
+}: {
+  title: string;
+  tone: string;
+  items: string[];
+  compact?: boolean;
+}) {
+  if (!items || items.length === 0) return null;
+  return (
+    <div className={cn("rounded-xl bg-[#fbfcff] px-3 py-3", compact && "mt-3 bg-white")}>
+      <div className={cn("inline-flex rounded-md px-2 py-1 text-[11px] font-black", tone)}>{title}</div>
+      <ul className="mt-2 space-y-1.5 text-[12.5px] font-medium leading-5 text-[#3b4a6b]">
+        {items.map((item, idx) => (
+          <li key={idx} className="flex gap-2">
+            <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-brand" />
+            {item}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 function ListSection({
   title,
   icon,

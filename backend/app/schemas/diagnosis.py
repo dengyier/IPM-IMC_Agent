@@ -2,6 +2,8 @@
 
 from datetime import datetime
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 # 商业模式画布 9 模块
@@ -27,6 +29,8 @@ class DiagnoseRequest(BaseModel):
     title: str
     question: str = ""
     company_name: str | None = None
+    # basic：基础报告；standard：标准报告；consulting：咨询式深度报告
+    report_depth: Literal["basic", "standard", "consulting"] = "consulting"
     # 9 模块画布输入：{module: 用户填写文本}
     canvas: dict[str, str] = Field(default_factory=dict)
 
@@ -54,6 +58,15 @@ class ModuleFinding(BaseModel):
     assessment: str = ""
     issues: list[str] = Field(default_factory=list)
     suggestions: list[str] = Field(default_factory=list)
+    current_judgement: str = ""
+    evidence_and_observations: list[str] = Field(default_factory=list)
+    key_issues: list[str] = Field(default_factory=list)
+    business_impact: str = ""
+    hypotheses_to_validate: list[str] = Field(default_factory=list)
+    recommended_actions: list[str] = Field(default_factory=list)
+    metrics_to_track: list[str] = Field(default_factory=list)
+    methodology_basis: list[str] = Field(default_factory=list)
+    confidence: float | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -80,8 +93,17 @@ class DiagnosisReportOut(BaseModel):
     company_name: str | None = None
     question: str
     intent: str | None = None
+    report_depth: str = "consulting"
     canvas_input: dict
     module_findings: dict
+    executive_summary: dict = Field(default_factory=dict)
+    core_tensions: list = Field(default_factory=list)
+    cross_canvas_logic: list = Field(default_factory=list)
+    unit_economics: dict = Field(default_factory=dict)
+    risk_matrix: list = Field(default_factory=list)
+    mvp_validation_path: list = Field(default_factory=list)
+    ninety_day_plan: dict = Field(default_factory=dict)
+    final_recommendation: dict = Field(default_factory=dict)
     key_assumptions: list[str]
     risks: list[str]
     recommended_actions: list[str]

@@ -76,6 +76,7 @@ def regenerate_report(report_id: str, db: Session = Depends(get_db)) -> TaskCrea
         title=report.title,
         question=report.question or "",
         company_name=report.company_name,
+        report_depth=getattr(report, "report_depth", "consulting") or "consulting",
         canvas=dict(report.canvas_input or {}),
     )
 

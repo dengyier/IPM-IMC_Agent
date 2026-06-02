@@ -1,6 +1,7 @@
 """聚合所有 ORM 模型，确保它们注册到 Base.metadata。"""
 
 from app.db.models.common import AgentRun, Task
+from app.db.models.auth import AuthSession, AuthUser, SmsVerificationCode
 from app.db.models.assistant import AssistantConversation, AssistantMessage
 from app.db.models.diagnosis import DiagnosisReport, ReportQualityCheck
 from app.db.models.expansion import (
@@ -22,6 +23,9 @@ from app.db.models.system import SystemSettings
 __all__ = [
     "AgentRun",
     "Task",
+    "AuthUser",
+    "AuthSession",
+    "SmsVerificationCode",
     "AssistantConversation",
     "AssistantMessage",
     "SystemSettings",

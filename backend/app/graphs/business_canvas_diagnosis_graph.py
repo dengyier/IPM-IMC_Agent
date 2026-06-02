@@ -54,7 +54,7 @@ class BusinessCanvasDiagnosisGraph:
         trace: list[str] = []
         run = self._start_run(
             "business_canvas_diagnosis",
-            {"title": request.title, "question": request.question},
+            {"title": request.title, "question": request.question, "report_depth": request.report_depth},
         )
         try:
             # 1. route
@@ -81,8 +81,17 @@ class BusinessCanvasDiagnosisGraph:
                 company_name=request.company_name,
                 question=request.question,
                 intent=payload.get("intent") or routing.intent,
+                report_depth=payload.get("report_depth") or request.report_depth,
                 canvas_input=request.canvas,
                 module_findings=payload["module_findings"],
+                executive_summary=payload.get("executive_summary", {}),
+                core_tensions=payload.get("core_tensions", []),
+                cross_canvas_logic=payload.get("cross_canvas_logic", []),
+                unit_economics=payload.get("unit_economics", {}),
+                risk_matrix=payload.get("risk_matrix", []),
+                mvp_validation_path=payload.get("mvp_validation_path", []),
+                ninety_day_plan=payload.get("ninety_day_plan", {}),
+                final_recommendation=payload.get("final_recommendation", {}),
                 key_assumptions=payload["key_assumptions"],
                 risks=payload["risks"],
                 recommended_actions=payload["recommended_actions"],
@@ -140,7 +149,7 @@ class BusinessCanvasDiagnosisGraph:
             input=input_payload,
             status="running",
             model_name=self.llm.model if (self.llm and self.llm.available) else "local",
-            prompt_version="phase3.v1",
+            prompt_version="phase3.v2-consulting",
         )
         self.db.add(run)
         self.db.flush()

@@ -78,6 +78,7 @@ export function CanvasDiagnosisPage() {
         title: title.trim(),
         company_name: company.trim() || null,
         question: question.trim(),
+        report_depth: "consulting",
         canvas: cleanCanvas,
       });
       setStatusMsg("AI 分析中（数十秒~分钟级）…");

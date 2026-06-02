@@ -16,11 +16,24 @@ export class ApiError extends Error {
   }
 }
 
+export const AUTH_TOKEN_KEY = "imc_ipm_auth_token";
+
+function getStoredAuthToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(AUTH_TOKEN_KEY);
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  const token = getStoredAuthToken();
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
-    cache: "no-store",
     ...init,
+    headers,
+    cache: "no-store",
   });
   const requestId = res.headers.get("X-Request-Id") || undefined;
 
@@ -55,8 +68,12 @@ export const api = {
 // 文件上传（multipart/form-data）。不可走 request()，因为它强制 JSON Content-Type；
 // 这里让浏览器自动带 boundary。
 async function uploadRequest<T>(path: string, form: FormData): Promise<T> {
+  const headers = new Headers();
+  const token = getStoredAuthToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
+    headers,
     body: form,
     cache: "no-store",
   });
@@ -199,6 +216,39 @@ export const dashboardApi = {
     api.get<RecentReport[]>(`/api/dashboard/recent-reports?limit=${limit}`),
   recentReviewTasks: (limit = 8) =>
     api.get<RecentReviewTask[]>(`/api/dashboard/recent-review-tasks?limit=${limit}`),
+};
+
+// ---- 认证 / 手机验证码登录 ----
+
+export interface AuthUser {
+  id: string;
+  phone: string;
+  display_name: string;
+  role: string;
+  created_at: string;
+  last_login_at: string | null;
+}
+
+export interface SendSmsCodeResponse {
+  sent: boolean;
+  expires_in_seconds: number;
+  resend_after_seconds: number;
+}
+
+export interface AuthLoginResponse {
+  token: string;
+  token_type: "Bearer";
+  expires_at: string;
+  user: AuthUser;
+}
+
+export const authApi = {
+  sendSmsCode: (phone: string) =>
+    api.post<SendSmsCodeResponse>("/api/auth/sms/send", { phone }),
+  loginWithSms: (phone: string, code: string) =>
+    api.post<AuthLoginResponse>("/api/auth/login/sms", { phone, code }),
+  me: () => api.get<AuthUser>("/api/auth/me"),
+  logout: () => api.post<void>("/api/auth/logout"),
 };
 
 // ---- 智能助手 ----
@@ -677,8 +727,17 @@ export interface DiagnosisReport {
   company_name: string | null;
   question: string;
   intent: string | null;
+  report_depth: string;
   canvas_input: Record<string, string>;
   module_findings: Record<string, unknown>;
+  executive_summary: Record<string, unknown>;
+  core_tensions: Record<string, unknown>[];
+  cross_canvas_logic: Record<string, unknown>[];
+  unit_economics: Record<string, unknown>;
+  risk_matrix: Record<string, unknown>[];
+  mvp_validation_path: Record<string, unknown>[];
+  ninety_day_plan: Record<string, unknown>;
+  final_recommendation: Record<string, unknown>;
   key_assumptions: string[];
   risks: string[];
   recommended_actions: string[];
@@ -715,6 +774,7 @@ export interface DiagnoseRequest {
   title: string;
   question?: string;
   company_name?: string | null;
+  report_depth?: "basic" | "standard" | "consulting";
   canvas: Record<string, string>;
 }
 

@@ -36,3 +36,38 @@ def init_db() -> None:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
     Base.metadata.create_all(bind=engine)
+    _ensure_sqlite_schema()
+
+
+def _ensure_sqlite_schema() -> None:
+    """本地 SQLite 轻量迁移：create_all 不会给已有表补新增列。"""
+    if not settings.database_url.startswith("sqlite"):
+        return
+    additions_by_table = {
+        "diagnosis_reports": {
+            "report_depth": "VARCHAR(40) DEFAULT 'consulting'",
+            "executive_summary": "JSON DEFAULT '{}'",
+            "core_tensions": "JSON DEFAULT '[]'",
+            "cross_canvas_logic": "JSON DEFAULT '[]'",
+            "unit_economics": "JSON DEFAULT '{}'",
+            "risk_matrix": "JSON DEFAULT '[]'",
+            "mvp_validation_path": "JSON DEFAULT '[]'",
+            "ninety_day_plan": "JSON DEFAULT '{}'",
+            "final_recommendation": "JSON DEFAULT '{}'",
+        },
+        "auth_users": {
+            "display_name": "VARCHAR(80) DEFAULT '张晓明'",
+            "role": "VARCHAR(40) DEFAULT '管理员'",
+            "status": "VARCHAR(20) DEFAULT 'active'",
+            "last_login_at": "DATETIME",
+        },
+    }
+    with engine.begin() as conn:
+        tables = {row[0] for row in conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'")}
+        for table, additions in additions_by_table.items():
+            if table not in tables:
+                continue
+            existing = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+            for column, ddl in additions.items():
+                if column not in existing:
+                    conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
