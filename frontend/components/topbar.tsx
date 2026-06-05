@@ -2,6 +2,7 @@
 
 import { Icon } from "./icon";
 import { useAuth } from "./auth-context";
+import { PendingTaskBell } from "./pending-task-bell";
 
 export function Topbar() {
   const { user } = useAuth();
@@ -16,12 +17,7 @@ export function Topbar() {
       </div>
 
       <div className="flex items-center gap-5">
-        <button className="relative flex h-10 w-10 items-center justify-center rounded-full text-[#172452] transition-colors hover:bg-white hover:text-brand">
-          <Icon name="bell" className="h-[19px] w-[19px]" />
-          <span className="absolute right-0.5 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold text-white ring-2 ring-white">
-            6
-          </span>
-        </button>
+        <PendingTaskBell />
         <button className="flex h-10 w-10 items-center justify-center rounded-full text-[#172452] transition-colors hover:bg-white hover:text-brand">
           <Icon name="help-circle" className="h-[19px] w-[19px]" />
         </button>

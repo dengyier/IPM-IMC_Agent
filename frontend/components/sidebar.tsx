@@ -70,6 +70,13 @@ export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
         <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
           每一次学习都会沉淀为可复用的知识资产
         </p>
+        <a
+          href="/knowledge-graph"
+          className="mt-3 flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-indigo-100 bg-white/85 text-[12px] font-bold text-brand transition-colors hover:bg-[#f6f5ff]"
+        >
+          查看完整图谱
+          <Icon name="chevron-right" className="h-3.5 w-3.5" />
+        </a>
         <div className="mt-4 space-y-3">
           <AssetStat label="资料总数" value={error ? "—" : sourceTotal !== null ? fmtNum(sourceTotal) : "··"} unit="份" />
           <AssetStat label="知识节点总数" value={error ? "—" : summary ? fmtNum(summary.nodes) : "··"} unit="个" />
@@ -77,13 +84,6 @@ export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
           <AssetStat label="诊断报告总数" value={error ? "—" : summary ? fmtNum(summary.reports) : "··"} unit="份" />
           <AssetStat label="待审核任务" value={error ? "—" : summary ? fmtNum(summary.pending_reviews) : "··"} unit="条" />
         </div>
-        <a
-          href="/knowledge-graph"
-          className="mt-4 flex h-9 items-center justify-center gap-1.5 rounded-xl border border-indigo-100 bg-white/80 text-[12px] font-bold text-brand transition-colors hover:bg-[#f6f5ff]"
-        >
-          查看完整图谱
-          <Icon name="chevron-right" className="h-3.5 w-3.5" />
-        </a>
         <div className="mt-2 flex justify-center pb-1 pt-1">
           <div className="isometric-blocks">
             <span className="left-[16px] top-[70px] h-[22px] w-[104px] rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500" />

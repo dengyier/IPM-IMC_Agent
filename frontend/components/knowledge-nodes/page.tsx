@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Card } from "@/components/card";
 import { Icon } from "@/components/icon";
+import { PendingTaskBell } from "@/components/pending-task-bell";
 import { cn } from "@/lib/utils";
 import {
   nodesApi,
@@ -166,12 +167,7 @@ function KnowledgeHeader({ total }: { total: number }) {
 function TopActions() {
   return (
     <div className="flex shrink-0 items-center gap-5">
-      <button className="relative flex h-10 w-10 items-center justify-center rounded-full text-[#172452] hover:bg-white">
-        <Icon name="bell" className="h-[19px] w-[19px]" />
-        <span className="absolute right-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold text-white ring-2 ring-white">
-          8
-        </span>
-      </button>
+      <PendingTaskBell className="hover:bg-white" />
     </div>
   );
 }
