@@ -123,15 +123,16 @@ class VectorStore:
                     for k, v in must_match.items()
                 ]
             )
-        hits = self.client.search(
+        response = self.client.query_points(
             collection_name=self.collection,
-            query_vector=query_vector,
+            query=query_vector,
             limit=limit,
             query_filter=query_filter,
+            with_payload=True,
         )
         return [
             SearchHit(id=str(h.id), score=float(h.score), payload=h.payload or {})
-            for h in hits
+            for h in response.points
         ]
 
     def _search_memory(
