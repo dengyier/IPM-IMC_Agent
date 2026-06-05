@@ -28,6 +28,17 @@ BUSINESS_KEYWORDS = [
     "战略", "决策", "市场", "竞争", "客户细分", "最小可行", "现金流",
 ]
 
+VALID_RELATION_TYPES = {
+    "prerequisite",
+    "supports",
+    "causes",
+    "constrains",
+    "validates",
+    "extends",
+    "contrasts",
+    "risk_trigger",
+}
+
 NODE_EXTRACTION_SYSTEM = (
     "你是港大 IMC&IPM 核心方法论结构化专家。请从课程资料中提炼可用于企业商业决策的"
     "核心方法论节点。注意：你不是提取关键词，而是提取可用于商业判断的思维单元；必须提炼"
@@ -222,10 +233,15 @@ class MethodologyKernelService:
         for item in data.get("nodes", []):
             if not isinstance(item, dict) or not item.get("node_name"):
                 continue
-            related = [
-                RelatedNodeRef(**r) if isinstance(r, dict) else RelatedNodeRef(target=str(r))
-                for r in item.get("related_nodes", [])
-            ]
+            related = []
+            for relation in item.get("related_nodes", []):
+                if not isinstance(relation, dict):
+                    related.append(RelatedNodeRef(target=str(relation)))
+                    continue
+                normalized = dict(relation)
+                if normalized.get("relation_type") not in VALID_RELATION_TYPES:
+                    normalized["relation_type"] = "supports"
+                related.append(RelatedNodeRef(**normalized))
             result.append(
                 MethodologyNodeCandidate(
                     node_name=str(item["node_name"]),

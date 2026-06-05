@@ -1,6 +1,6 @@
 """文档解析与切块。
 
-支持 PDF / DOCX / PPTX / TXT / MD，按页/幻灯片保留 page_number、section_title，
+支持 PDF / DOCX / PPTX / XLSX / TXT / MD，按页/幻灯片/工作表保留 page_number、section_title，
 再做语义友好的切块（保留标题、控制大小、带 overlap）。
 """
 
@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-SUPPORTED_SUFFIXES = {".pdf", ".docx", ".txt", ".md", ".pptx"}
+SUPPORTED_SUFFIXES = {".pdf", ".docx", ".txt", ".md", ".pptx", ".xlsx"}
 
 
 @dataclass
@@ -36,6 +36,8 @@ def parse_document_pages(path: Path) -> list[tuple[int, str]]:
         return _parse_pptx_pages(path)
     if suffix == ".docx":
         return [(1, _parse_docx(path))]
+    if suffix == ".xlsx":
+        return _parse_xlsx_pages(path)
     # txt / md
     return [(1, path.read_text(encoding="utf-8", errors="ignore"))]
 
@@ -181,3 +183,84 @@ def _parse_pptx_pages(path: Path) -> list[tuple[int, str]]:
         if texts:
             pages.append((number, "\n\n".join(texts)))
     return pages or [(1, "")]
+
+
+def _parse_xlsx_pages(path: Path) -> list[tuple[int, str]]:
+    """轻量解析 XLSX：每个工作表作为一页，输出可检索的表格文本。
+
+    这里避免新增运行时依赖，直接读取 XLSX 内部 XML。对于财报类课程案例，
+    结构化数字会以制表符连接，便于后续切块与向量检索。
+    """
+    import zipfile
+    import xml.etree.ElementTree as ET
+
+    ns = {
+        "main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+        "rel": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+        "pkgrel": "http://schemas.openxmlformats.org/package/2006/relationships",
+    }
+
+    def read_xml(zf: zipfile.ZipFile, name: str) -> ET.Element | None:
+        try:
+            return ET.fromstring(zf.read(name))
+        except KeyError:
+            return None
+
+    def shared_strings(zf: zipfile.ZipFile) -> list[str]:
+        root = read_xml(zf, "xl/sharedStrings.xml")
+        if root is None:
+            return []
+        values: list[str] = []
+        for si in root.findall("main:si", ns):
+            texts = [t.text or "" for t in si.findall(".//main:t", ns)]
+            values.append("".join(texts))
+        return values
+
+    def cell_value(cell: ET.Element, strings: list[str]) -> str:
+        cell_type = cell.attrib.get("t")
+        value = cell.find("main:v", ns)
+        if value is None or value.text is None:
+            inline = cell.find("main:is", ns)
+            if inline is not None:
+                return "".join(t.text or "" for t in inline.findall(".//main:t", ns)).strip()
+            return ""
+        raw = value.text.strip()
+        if cell_type == "s":
+            try:
+                return strings[int(raw)].strip()
+            except (ValueError, IndexError):
+                return raw
+        return raw
+
+    with zipfile.ZipFile(path) as zf:
+        workbook = read_xml(zf, "xl/workbook.xml")
+        rels = read_xml(zf, "xl/_rels/workbook.xml.rels")
+        if workbook is None or rels is None:
+            return [(1, "")]
+
+        rel_targets = {
+            rel.attrib.get("Id"): rel.attrib.get("Target", "")
+            for rel in rels.findall("pkgrel:Relationship", ns)
+        }
+        strings = shared_strings(zf)
+        pages: list[tuple[int, str]] = []
+        for number, sheet in enumerate(workbook.findall("main:sheets/main:sheet", ns), start=1):
+            title = sheet.attrib.get("name") or f"Sheet{number}"
+            rid = sheet.attrib.get(f"{{{ns['rel']}}}id")
+            target = rel_targets.get(rid, "")
+            if not target:
+                continue
+            sheet_path = "xl/" + target.lstrip("/")
+            root = read_xml(zf, sheet_path)
+            if root is None:
+                continue
+            rows: list[str] = [f"工作表：{title}"]
+            for row in root.findall(".//main:sheetData/main:row", ns):
+                values = [cell_value(c, strings) for c in row.findall("main:c", ns)]
+                values = [v for v in values if v]
+                if values:
+                    rows.append("\t".join(values))
+            text = "\n".join(rows).strip()
+            if text:
+                pages.append((number, text))
+        return pages or [(1, "")]

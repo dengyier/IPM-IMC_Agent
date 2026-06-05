@@ -22,6 +22,7 @@ class LLMService:
                 self._client = OpenAI(
                     api_key=settings.deepseek_api_key,
                     base_url=settings.deepseek_base_url,
+                    timeout=90,
                 )
             except Exception:
                 self._client = None
