@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Card } from "@/components/card";
 import { Icon } from "@/components/icon";
 import { useAuth } from "@/components/auth-context";
+import { PendingTaskBell } from "@/components/pending-task-bell";
 import { ApiError, EditableSystemSettings, systemApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -212,12 +213,7 @@ function SettingsHeader() {
             placeholder="搜索设置项，例如：模型、权限、通知..."
           />
         </div>
-        <button className="relative flex h-10 w-10 items-center justify-center rounded-full text-[#172452] hover:bg-white">
-          <Icon name="bell" className="h-[19px] w-[19px]" />
-          <span className="absolute right-0.5 top-0 h-4 min-w-4 rounded-full bg-rose-500 px-1 text-center text-[10px] font-semibold leading-4 text-white ring-2 ring-white">
-            8
-          </span>
-        </button>
+        <PendingTaskBell className="hover:bg-white" />
         <button className="flex h-10 w-10 items-center justify-center rounded-full text-[#172452] hover:bg-white">
           <Icon name="help-circle" className="h-[19px] w-[19px]" />
         </button>
