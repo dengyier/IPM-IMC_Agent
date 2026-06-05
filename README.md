@@ -4,7 +4,7 @@
 
 ## 功能范围
 
-- 文件上传与解析：支持 `PDF`、`DOCX`、`TXT`、`MD`、`PPTX`
+- 文件上传与解析：支持 `PDF`、`DOCX`、`TXT`、`MD`、`PPTX`、`XLSX`
 - 文档清洗、分块、Embedding 与向量入库
 - 知识节点候选抽取与人工审核
 - 商业画布九宫格深度诊断与结构化报告生成
@@ -13,31 +13,26 @@
 ## 项目结构
 
 ```text
-backend/     FastAPI API、数据模型、Agent 工作流、解析与检索服务
-docker-compose.yml
+backend/     FastAPI API、数据模型、Agent 工作流、解析与检索服务、运维脚本
+frontend/    Next.js 14 前端工作台
+deploy/      Nginx 反向代理配置
+docs/        部署文档
+docker-compose.yml   全栈一键部署编排（postgres + qdrant + 后端 + 前端 + nginx）
 .env.example
 ```
 
-## 快速启动
-
-1. 复制配置：
+## 快速启动（Docker 一键部署）
 
 ```bash
-cp .env.example .env
+cp .env.example .env          # 改 POSTGRES_PASSWORD、PUBLIC_BASE_URL，按需填 DEEPSEEK / 腾讯云短信
+docker compose up -d --build
+docker compose ps
 ```
 
-2. 启动基础服务和应用：
+启动后访问 `http://localhost/`（Nginx 默认 80 端口；后端经 `/api`、`/docs` 代理）。
+数据持久化在 `postgres_data` / `qdrant_data` / `upload_data` 三个命名卷，更新代码不丢数据。
 
-```bash
-docker compose up --build
-```
-
-3. 打开：
-
-- 前端工作台：http://localhost:13005
-- 后端 API：http://localhost:18005/docs
-- Qdrant：http://localhost:6333/dashboard
-- MinIO Console：http://localhost:9001
+完整部署、数据迁移、HTTPS、备份恢复见 **[docs/香港服务器部署文档.md](docs/香港服务器部署文档.md)**。
 
 没有配置 DeepSeek Key 时，后端会使用本地确定性生成逻辑，便于先跑通 Demo 流程。
 
