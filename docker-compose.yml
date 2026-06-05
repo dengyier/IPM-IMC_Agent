@@ -1,53 +1,93 @@
+# ============================================================================
+# IMC&IPM 商业决策智能体 —— 全栈一键部署编排
+#
+#   cp .env.example .env   # 填写密钥与公网地址
+#   docker compose up -d --build
+#
+# 数据持久化在命名卷 postgres_data / qdrant_data / upload_data，
+# 更新代码（git pull + 重新 build）不会丢失知识资产。详见 docs/香港服务器部署文档.md。
+# ============================================================================
+
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-imc_ipm}
       POSTGRES_USER: ${POSTGRES_USER:-imc}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-imc_password}
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-imc} -d ${POSTGRES_DB:-imc_ipm}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # 仅本机调试时再放开端口；生产保持内网即可
+    # ports:
+    #   - "127.0.0.1:5432:5432"
 
   qdrant:
-    image: qdrant/qdrant:latest
-    ports:
-      - "6333:6333"
+    image: qdrant/qdrant:latest   # 可固定为 qdrant/qdrant:v1.18.2 以保证可复现
+    restart: unless-stopped
     volumes:
       - qdrant_data:/qdrant/storage
-
-  minio:
-    image: minio/minio:RELEASE.2024-07-16T23-46-41Z
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-imc}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-imc_password}
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio_data:/data
+    # ports:
+    #   - "127.0.0.1:6333:6333"
 
   api:
     build:
       context: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://imc:imc_password@postgres:5432/imc_ipm}
-      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      # 以下三项由编排强制指向容器内服务，覆盖 .env 中的同名值
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-imc}:${POSTGRES_PASSWORD:-imc_password}@postgres:5432/${POSTGRES_DB:-imc_ipm}
+      QDRANT_URL: http://qdrant:6333
       STORAGE_DIR: /data/uploads
-    ports:
-      - "18005:18005"
     volumes:
       - upload_data:/data/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:18005/').status==200 else sys.exit(1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    # ports:
+    #   - "127.0.0.1:18005:18005"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # 浏览器访问后端的根地址（不带 /api），构建期注入；改地址需重新 build
+        NEXT_PUBLIC_API_BASE: ${PUBLIC_BASE_URL:-http://localhost:18005}
+    restart: unless-stopped
     depends_on:
-      - postgres
-      - qdrant
+      - api
+    # ports:
+    #   - "127.0.0.1:13005:13005"
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+      - frontend
+    ports:
+      - "80:80"
+      # 配好证书后启用 443，并在 deploy/nginx.conf 增加 ssl server 块
+      # - "443:443"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # - ./deploy/certs:/etc/nginx/certs:ro
 
 volumes:
   postgres_data:
   qdrant_data:
-  minio_data:
   upload_data:
