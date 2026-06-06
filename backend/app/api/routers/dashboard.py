@@ -5,8 +5,15 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_app_settings, get_core_store, get_llm
+from app.api.deps import (
+    get_app_settings,
+    get_core_store,
+    get_current_user,
+    get_llm,
+    tenant_scope,
+)
 from app.core.config import Settings
+from app.db.models.auth import AuthUser
 from app.db.session import get_db
 from app.schemas.dashboard import (
     DashboardSummary,
@@ -27,8 +34,9 @@ def summary(
     core_store: VectorStore = Depends(get_core_store),
     llm: LLMService = Depends(get_llm),
     settings: Settings = Depends(get_app_settings),
+    user: AuthUser = Depends(get_current_user),
 ) -> DashboardSummary:
-    return DashboardService(db).summary(
+    return DashboardService(db, tenant_scope(user)).summary(
         core_store=core_store,
         llm=llm,
         embedding_provider=settings.embedding_provider,
@@ -36,19 +44,26 @@ def summary(
 
 
 @router.get("/pending-items", response_model=list[PendingItem])
-def pending_items(db: Session = Depends(get_db)) -> list[PendingItem]:
-    return DashboardService(db).pending_items()
+def pending_items(
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+) -> list[PendingItem]:
+    return DashboardService(db, tenant_scope(user)).pending_items()
 
 
 @router.get("/recent-reports", response_model=list[RecentReport])
 def recent_reports(
-    limit: int = 8, db: Session = Depends(get_db)
+    limit: int = 8,
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
 ) -> list[RecentReport]:
-    return DashboardService(db).recent_reports(limit=limit)
+    return DashboardService(db, tenant_scope(user)).recent_reports(limit=limit)
 
 
 @router.get("/recent-review-tasks", response_model=list[RecentReviewTask])
 def recent_review_tasks(
-    limit: int = 8, db: Session = Depends(get_db)
+    limit: int = 8,
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
 ) -> list[RecentReviewTask]:
-    return DashboardService(db).recent_review_tasks(limit=limit)
+    return DashboardService(db, tenant_scope(user)).recent_review_tasks(limit=limit)

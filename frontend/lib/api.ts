@@ -60,6 +60,8 @@ export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined }),
+  patch: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: "PATCH", body: body ? JSON.stringify(body) : undefined }),
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "PUT", body: body ? JSON.stringify(body) : undefined }),
   del: <T>(path: string) => request<T>(path, { method: "DELETE" }),
@@ -225,7 +227,12 @@ export interface AuthUser {
   phone: string;
   display_name: string;
   role: string;
-  created_at: string;
+  user_type: string;
+  tenant_id: string | null;
+  tenant_name: string | null;
+  is_super_admin: boolean;
+  can_review: boolean;
+  created_at: string | null;
   last_login_at: string | null;
 }
 
@@ -248,6 +255,7 @@ export const authApi = {
   loginWithSms: (phone: string, code: string) =>
     api.post<AuthLoginResponse>("/api/auth/login/sms", { phone, code }),
   me: () => api.get<AuthUser>("/api/auth/me"),
+  updateMe: (payload: { display_name: string }) => api.patch<AuthUser>("/api/auth/me", payload),
   logout: () => api.post<void>("/api/auth/logout"),
 };
 
@@ -258,6 +266,12 @@ export interface AssistantNodeRef {
   name: string;
   category: string | null;
   score: number;
+}
+
+export interface AssistantAttachment {
+  name: string;
+  chars?: number | null;
+  truncated?: boolean;
 }
 
 export interface AssistantAskResponse {
@@ -275,6 +289,7 @@ export interface AssistantMessageRecord {
   id: string;
   role: "user" | "assistant";
   content: string;
+  attachments?: AssistantAttachment[];
   node_refs: AssistantNodeRef[];
   suggested_questions: string[];
   used_llm: boolean;
@@ -291,9 +306,21 @@ export interface AssistantConversationRecord {
   created_at: string;
 }
 
+export interface AssistantParseFileResult {
+  filename: string;
+  chars: number;
+  truncated: boolean;
+  text: string;
+}
+
 export const assistantApi = {
   conversations: () =>
     api.get<AssistantConversationRecord[]>("/api/assistant/conversations"),
+  parseFile: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return uploadRequest<AssistantParseFileResult>("/api/assistant/parse-file", form);
+  },
   createConversation: (title?: string) =>
     api.post<AssistantConversationRecord>("/api/assistant/conversations", { title }),
   deleteConversation: (id: string) =>
@@ -302,11 +329,17 @@ export const assistantApi = {
     api.get<AssistantMessageRecord[]>(
       `/api/assistant/messages${conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : ""}`
     ),
-  ask: (question: string, companyContext?: string, conversationId?: string | null) =>
+  ask: (
+    question: string,
+    companyContext?: string,
+    conversationId?: string | null,
+    attachments?: AssistantAttachment[]
+  ) =>
     api.post<AssistantAskResponse>("/api/assistant/ask", {
       question,
       company_context: companyContext,
       conversation_id: conversationId || undefined,
+      attachments: attachments && attachments.length > 0 ? attachments : undefined,
     }),
 };
 
@@ -618,6 +651,15 @@ export interface ReviewDecisionResult {
   message: string;
 }
 
+export interface BulkReviewDecisionResult {
+  decision: string;
+  requested_count: number;
+  updated_count: number;
+  skipped_count: number;
+  node_version_ids: string[];
+  message: string;
+}
+
 export const expansionApi = {
   items: (params: { reviewStatus?: string; alignedNodeId?: string } = {}) => {
     const qs = new URLSearchParams();
@@ -717,6 +759,13 @@ export const reviewApi = {
       evolve_on_approve?: boolean;
     }
   ) => api.post<ReviewDecisionResult>(`/api/review/tasks/${id}/decide`, payload),
+  bulkDecide: (payload: {
+    decision: Exclude<ReviewDecision, "revise_required">;
+    task_ids: string[];
+    reviewer?: string;
+    comment?: string;
+    evolve_on_approve?: boolean;
+  }) => api.post<BulkReviewDecisionResult>("/api/review/tasks/bulk-decide", payload),
 };
 
 // ---- 诊断报告（商业画布诊断产出）----

@@ -25,10 +25,19 @@ class AuthUserOut(BaseModel):
     phone: str
     display_name: str
     role: str
-    created_at: datetime
+    user_type: str = "individual"
+    tenant_id: str | None = None
+    tenant_name: str | None = None
+    is_super_admin: bool = False
+    can_review: bool = False
+    created_at: datetime | None = None
     last_login_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class AuthProfileUpdate(BaseModel):
+    display_name: str = Field(min_length=1, max_length=80)
 
 
 class AuthLoginResponse(BaseModel):

@@ -46,6 +46,8 @@ export function ReviewPage() {
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [bulkBusy, setBulkBusy] = useState<"" | "approved" | "rejected">("");
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
 
   async function loadAll(keepSelection = true) {
     setLoading(true);
@@ -91,9 +93,44 @@ export function ReviewPage() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const pageItems = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const pendingFilteredIds = useMemo(
+    () => filtered.filter((t) => t.status === "pending").map((t) => t.id),
+    [filtered]
+  );
+
+  async function bulkDecide(decision: "approved" | "rejected") {
+    const ids = pendingFilteredIds;
+    if (!ids.length || bulkBusy) return;
+    const action = decision === "approved" ? "通过" : "拒绝";
+    if (
+      decision === "rejected" &&
+      !window.confirm(`确认一键拒绝当前筛选出的 ${ids.length} 条待审核任务吗？`)
+    ) {
+      return;
+    }
+    setBulkBusy(decision);
+    setBulkMsg(null);
+    try {
+      const res = await reviewApi.bulkDecide({
+        decision,
+        task_ids: ids,
+        reviewer: REVIEWER,
+        comment: `一键${action}`,
+        evolve_on_approve: decision === "approved",
+      });
+      setBulkMsg(res.message || `已一键${action}。`);
+      setSelectedId(null);
+      await loadAll(false);
+    } catch (e) {
+      setBulkMsg(e instanceof ApiError ? `批量操作失败：${e.message}` : "批量操作失败");
+    } finally {
+      setBulkBusy("");
+    }
+  }
 
   useEffect(() => {
     setPage(1);
+    setBulkMsg(null);
   }, [tab, query]);
 
   // 默认选中当前筛选结果的第一条
@@ -119,6 +156,10 @@ export function ReviewPage() {
               page={safePage}
               totalPages={totalPages}
               onPageChange={setPage}
+              pendingCount={pendingFilteredIds.length}
+              bulkBusy={bulkBusy}
+              bulkMsg={bulkMsg}
+              onBulkDecide={bulkDecide}
             />
             <TaskDetailPanel taskId={selectedId} onDecided={() => loadAll(true)} />
           </div>
@@ -215,6 +256,10 @@ function TaskList({
   page,
   totalPages,
   onPageChange,
+  pendingCount,
+  bulkBusy,
+  bulkMsg,
+  onBulkDecide,
 }: {
   items: ReviewTask[];
   total: number;
@@ -225,12 +270,24 @@ function TaskList({
   page: number;
   totalPages: number;
   onPageChange: (p: number) => void;
+  pendingCount: number;
+  bulkBusy: "" | "approved" | "rejected";
+  bulkMsg: string | null;
+  onBulkDecide: (decision: "approved" | "rejected") => void;
 }) {
   return (
     <Card className="flex flex-col px-4 py-4">
       <div className="flex items-center justify-between px-1 pb-1">
         <h2 className="text-[15px] font-black text-ink">审核任务（{total}）</h2>
       </div>
+      {pendingCount > 0 && (
+        <BulkBar
+          pendingCount={pendingCount}
+          bulkBusy={bulkBusy}
+          bulkMsg={bulkMsg}
+          onBulkDecide={onBulkDecide}
+        />
+      )}
       <div className="mt-3 space-y-3">
         {loading && <p className="px-1 py-8 text-center text-[13px] text-slate-400">加载中…</p>}
         {error && !loading && (
@@ -242,13 +299,59 @@ function TaskList({
         {!loading &&
           !error &&
           items.map((t) => (
-            <TaskCard key={t.id} task={t} active={t.id === selectedId} onClick={() => onSelect(t.id)} />
+            <TaskCard
+              key={t.id}
+              task={t}
+              active={t.id === selectedId}
+              onClick={() => onSelect(t.id)}
+            />
           ))}
       </div>
       {totalPages > 1 && (
         <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />
       )}
     </Card>
+  );
+}
+
+function BulkBar({
+  pendingCount,
+  bulkBusy,
+  bulkMsg,
+  onBulkDecide,
+}: {
+  pendingCount: number;
+  bulkBusy: "" | "approved" | "rejected";
+  bulkMsg: string | null;
+  onBulkDecide: (decision: "approved" | "rejected") => void;
+}) {
+  return (
+    <div className="mt-2 rounded-xl border border-line bg-[#fbfbff] px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <span className="rounded-md bg-[#f0edff] px-2 py-0.5 text-[11px] font-bold text-brand">
+          当前筛选 {pendingCount} 条待审核
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => onBulkDecide("approved")}
+            disabled={pendingCount === 0 || !!bulkBusy}
+            className="flex h-8 items-center gap-1.5 rounded-lg bg-emerald-500 px-3 text-[12.5px] font-bold text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Icon name="check-circle" className="h-4 w-4" />
+            {bulkBusy === "approved" ? "处理中…" : "一键通过"}
+          </button>
+          <button
+            onClick={() => onBulkDecide("rejected")}
+            disabled={pendingCount === 0 || !!bulkBusy}
+            className="flex h-8 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 text-[12.5px] font-bold text-rose-500 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Icon name="x-circle" className="h-4 w-4" />
+            {bulkBusy === "rejected" ? "处理中…" : "一键拒绝"}
+          </button>
+        </div>
+      </div>
+      {bulkMsg && <p className="mt-2 text-[12px] font-semibold text-brand">{bulkMsg}</p>}
+    </div>
   );
 }
 

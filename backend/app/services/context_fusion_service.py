@@ -84,6 +84,7 @@ class ContextFusionService:
         question: str,
         routing: RoutingDecision,
         canvas: dict[str, str] | None = None,
+        tenant_id: str | None = None,
     ) -> FusedContext:
         query_text = (question or "") + "\n" + "\n".join((canvas or {}).values())
         qv = self.embeddings.embed_text(query_text or "商业决策")
@@ -91,7 +92,7 @@ class ContextFusionService:
         nodes = self._fuse_nodes(routing, qv)
         node_ids = [n.id for n in nodes]
         core_chunks = self._fuse_core_chunks(qv)
-        approved, cases = self._fuse_expansions(node_ids, qv)
+        approved, cases = self._fuse_expansions(node_ids, qv, tenant_id)
 
         # 综合分（用于追踪/排序参考）
         node_avg = _avg([n.score for n in nodes])
@@ -179,12 +180,15 @@ class ContextFusionService:
     # ------------------------------------------------------------------ #
 
     def _fuse_expansions(
-        self, node_ids: list[str], qv: list[float]
+        self, node_ids: list[str], qv: list[float], tenant_id: str | None = None
     ) -> tuple[list[FusedExpansion], list[FusedExpansion]]:
         # 只取已审核通过的扩展（未审核不参与正式诊断）
         query = self.db.query(ExpansionItem).filter(
             ExpansionItem.review_status == "approved"
         )
+        # 多租户隔离：仅检索本租户的扩展（super_admin 传 None 时不限）
+        if tenant_id is not None:
+            query = query.filter(ExpansionItem.tenant_id == tenant_id)
         if node_ids:
             query = query.filter(ExpansionItem.aligned_node_id.in_(node_ids))
         items = query.order_by(ExpansionItem.created_at.desc()).all()

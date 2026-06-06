@@ -38,9 +38,11 @@ def create_task(
     *,
     input: dict[str, Any] | None = None,
     resource_id: str | None = None,
+    tenant_id: str | None = None,
 ) -> Task:
     """在**请求 session**里创建任务记录并提交，使其立刻可被轮询。"""
     task = Task(
+        tenant_id=tenant_id,
         task_type=task_type,
         status="running",
         progress=0,

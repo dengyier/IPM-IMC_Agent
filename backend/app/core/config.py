@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/imc_ipm.db"
 
     # Qdrant 向量库
-    qdrant_url: str = "http://localhost:6333"
+    qdrant_url: str = "http://127.0.0.1:6333"
     methodology_core_collection: str = "methodology_core_chunks"
     expansion_collection: str = "expansion_chunks"
 

@@ -115,14 +115,14 @@ class ExternalInfoEvolutionGraph:
             trace.append(f"抽取扩展单元：{len(items)} 个，对齐核心节点并生成审核任务")
             trace.append(f"生成待审核任务：{len(tasks)} 个（review_status=pending）")
 
-            source.status = "absorbed"
+            source.status = "pending_review" if tasks else "extraction_empty"
             self.db.add(source)
             self.db.flush()
-            trace.append("来源状态更新为 absorbed")
+            trace.append(f"来源状态更新为 {source.status}")
 
             result = AbsorbExpansionResult(
                 source_id=source.id,
-                status="absorbed",
+                status=source.status,
                 chunk_count=len(records),
                 embedded_count=embedded,
                 item_count=len(items),

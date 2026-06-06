@@ -19,8 +19,10 @@ from app.db.models.methodology import (
     ProblemRoutingRule,
 )
 from app.db.models.system import SystemSettings
+from app.db.models.tenant import Tenant
 
 __all__ = [
+    "Tenant",
     "AgentRun",
     "Task",
     "AuthUser",

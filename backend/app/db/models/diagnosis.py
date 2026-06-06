@@ -20,6 +20,7 @@ class DiagnosisReport(Base):
     __tablename__ = "diagnosis_reports"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    tenant_id: Mapped[str | None] = mapped_column(String(36), index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     company_name: Mapped[str | None] = mapped_column(String(255))
     question: Mapped[str] = mapped_column(Text, default="")
@@ -58,6 +59,7 @@ class ReportQualityCheck(Base):
     __tablename__ = "report_quality_checks"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    tenant_id: Mapped[str | None] = mapped_column(String(36), index=True)
     report_id: Mapped[str] = mapped_column(
         ForeignKey("diagnosis_reports.id"), nullable=False
     )

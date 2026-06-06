@@ -14,6 +14,7 @@ class AssistantConversation(Base):
     __tablename__ = "assistant_conversations"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    tenant_id: Mapped[str | None] = mapped_column(String(36), index=True)
     title: Mapped[str] = mapped_column(String(160), default="新会话")
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
@@ -26,9 +27,11 @@ class AssistantMessage(Base):
     __tablename__ = "assistant_messages"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    tenant_id: Mapped[str | None] = mapped_column(String(36), index=True)
     conversation_id: Mapped[str] = mapped_column(String(80), default="default", index=True)
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    attachments: Mapped[list] = mapped_column(JsonType, default=list)
     node_refs: Mapped[list] = mapped_column(JsonType, default=list)
     suggested_questions: Mapped[list] = mapped_column(JsonType, default=list)
     used_llm: Mapped[bool] = mapped_column(Boolean, default=False)

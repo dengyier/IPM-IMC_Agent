@@ -139,6 +139,23 @@ class ReviewDecisionResult(BaseModel):
     message: str = ""
 
 
+class BulkReviewDecisionRequest(BaseModel):
+    decision: ReviewStatus
+    task_ids: list[str] = Field(default_factory=list)
+    reviewer: str | None = None
+    comment: str | None = None
+    evolve_on_approve: bool = True
+
+
+class BulkReviewDecisionResult(BaseModel):
+    decision: str
+    requested_count: int
+    updated_count: int
+    skipped_count: int
+    node_version_ids: list[str] = Field(default_factory=list)
+    message: str = ""
+
+
 # --------------------------------------------------------------------------- #
 # Node versions
 # --------------------------------------------------------------------------- #

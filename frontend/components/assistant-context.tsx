@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
   assistantApi,
+  type AssistantAttachment,
   type AssistantConversationRecord,
   type AssistantMessageRecord,
   type AssistantNodeRef,
@@ -12,6 +13,7 @@ export type AssistantMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  attachments?: AssistantAttachment[];
   nodeRefs?: AssistantNodeRef[];
   suggestedQuestions?: string[];
   usedLlm?: boolean;
@@ -29,7 +31,7 @@ type AssistantContextValue = {
   loading: boolean;
   historyLoading: boolean;
   setInput: (value: string) => void;
-  sendQuestion: (question?: string) => Promise<void>;
+  sendQuestion: (question?: string, companyContext?: string, attachments?: AssistantAttachment[]) => Promise<void>;
   createConversation: () => Promise<void>;
   selectConversation: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
@@ -44,11 +46,21 @@ const WELCOME_MESSAGE: AssistantMessage = {
     "你好，我是 IMC&IPM 智能助手。你可以直接输入企业诉求，我会结合核心知识节点与 DeepSeek，给出基于 IMC&IPM 方法论的解决建议。",
 };
 
+function titleFromQuestion(question: string): string {
+  const title = question.trim().replace(/\s+/g, " ");
+  return title.length > 28 ? `${title.slice(0, 28)}...` : title;
+}
+
+function isPlaceholderTitle(title?: string | null): boolean {
+  return !title || ["新会话", "历史会话"].includes(title.trim());
+}
+
 function mapRecordToMessage(record: AssistantMessageRecord): AssistantMessage {
   return {
     id: record.id,
     role: record.role,
     content: record.content,
+    attachments: record.attachments || [],
     usedLlm: record.used_llm,
     nodeRefs: record.node_refs,
     suggestedQuestions: record.suggested_questions,
@@ -115,7 +127,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const sendQuestion = useCallback(
-    async (question?: string) => {
+    async (question?: string, companyContext?: string, attachments?: AssistantAttachment[]) => {
       const text = (question ?? input).trim();
       if (!text || loading) return;
       const conversationId = activeConversationId;
@@ -126,15 +138,27 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
           id: `u-${Date.now()}`,
           role: "user",
           content: text,
+          attachments,
         },
       ]);
       setInput("");
       setLoading(true);
       try {
-        const result = await assistantApi.ask(text, undefined, conversationId);
+        const result = await assistantApi.ask(text, companyContext, conversationId, attachments);
+        const nextConversationId = result.conversation_id || conversationId;
         if (result.conversation_id && result.conversation_id !== activeConversationId) {
           setActiveConversationId(result.conversation_id);
           window.localStorage.setItem("imc_ipm_active_assistant_conversation", result.conversation_id);
+        }
+        if (nextConversationId) {
+          const nextTitle = titleFromQuestion(text);
+          setConversations((prev) =>
+            prev.map((conversation) =>
+              conversation.id === nextConversationId && isPlaceholderTitle(conversation.title)
+                ? { ...conversation, title: nextTitle }
+                : conversation
+            )
+          );
         }
         setMessages((prev) => [
           ...prev,

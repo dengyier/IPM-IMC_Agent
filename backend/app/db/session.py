@@ -43,6 +43,7 @@ def _ensure_sqlite_schema() -> None:
     """本地 SQLite 轻量迁移：create_all 不会给已有表补新增列。"""
     if not settings.database_url.startswith("sqlite"):
         return
+    tenant_col = "VARCHAR(36)"
     additions_by_table = {
         "diagnosis_reports": {
             "report_depth": "VARCHAR(40) DEFAULT 'consulting'",
@@ -54,13 +55,28 @@ def _ensure_sqlite_schema() -> None:
             "mvp_validation_path": "JSON DEFAULT '[]'",
             "ninety_day_plan": "JSON DEFAULT '{}'",
             "final_recommendation": "JSON DEFAULT '{}'",
+            "tenant_id": tenant_col,
         },
+        "report_quality_checks": {"tenant_id": tenant_col},
         "auth_users": {
             "display_name": "VARCHAR(80) DEFAULT '张晓明'",
-            "role": "VARCHAR(40) DEFAULT '管理员'",
+            "role": "VARCHAR(40) DEFAULT 'member'",
             "status": "VARCHAR(20) DEFAULT 'active'",
             "last_login_at": "DATETIME",
+            "tenant_id": tenant_col,
+            "user_type": "VARCHAR(40) DEFAULT 'individual'",
         },
+        "assistant_conversations": {"tenant_id": tenant_col},
+        "assistant_messages": {
+            "tenant_id": tenant_col,
+            "attachments": "JSON DEFAULT '[]'",
+        },
+        "expansion_sources": {"tenant_id": tenant_col},
+        "expansion_chunks": {"tenant_id": tenant_col},
+        "expansion_items": {"tenant_id": tenant_col},
+        "review_tasks": {"tenant_id": tenant_col},
+        "tasks": {"tenant_id": tenant_col},
+        "agent_runs": {"tenant_id": tenant_col},
     }
     with engine.begin() as conn:
         tables = {row[0] for row in conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'")}
