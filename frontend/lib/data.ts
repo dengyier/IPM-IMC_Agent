@@ -1,3 +1,5 @@
+import type { GuardedNavItem } from "@/lib/authz";
+
 export type Trend = "up" | "down";
 
 export interface Stat {
@@ -107,7 +109,6 @@ export const recentReports: ReportRow[] = [
 ];
 
 export const quickActions = [
-  { icon: "folder", label: "资料中心", href: "/data-center" },
   { icon: "list-tree", label: "知识节点库", href: "/knowledge-nodes" },
   { icon: "layout-grid", label: "商业画布诊断", href: "/canvas-diagnosis" },
   { icon: "git-branch", label: "知识扩展", href: "/note-evolution" },
@@ -132,13 +133,26 @@ export const assistantPrompts = [
   { icon: "file-text", label: "生成一份商业画布报告" },
 ];
 
-export const navItems = [
+export const navItems: GuardedNavItem[] = [
   { key: "home", icon: "home", label: "工作台首页", href: "/" },
-  { key: "data-center", icon: "folder", label: "资料中心", href: "/data-center" },
-  { key: "knowledge", icon: "list-tree", label: "知识节点库", href: "/knowledge-nodes" },
+  // 资料中心仅超管可见：承担核心方法论上传/解析/建底座。非超管的外部资料管理统一在「知识扩展」页。
+  {
+    key: "data-center",
+    icon: "folder",
+    label: "资料中心",
+    href: "/data-center",
+    requiresSuperAdmin: true,
+  },
+  {
+    key: "knowledge",
+    icon: "list-tree",
+    label: "知识节点库",
+    href: "/knowledge-nodes",
+    requiresSuperAdmin: true,
+  },
   { key: "canvas", icon: "layout-grid", label: "商业画布诊断", href: "/canvas-diagnosis" },
   { key: "notes", icon: "git-branch", label: "知识扩展", href: "/note-evolution" },
-  { key: "review", icon: "users", label: "人工审核台", href: "/review" },
+  { key: "review", icon: "users", label: "人工审核台", href: "/review", requiresReview: true },
   { key: "reports", icon: "file-bar-chart", label: "诊断报告中心", href: "/reports" },
   { key: "settings", icon: "settings", label: "系统设置", href: "/settings" },
 ];

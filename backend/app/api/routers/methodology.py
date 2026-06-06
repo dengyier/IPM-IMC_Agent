@@ -9,7 +9,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_core_store, get_embeddings, get_llm, get_storage
+from app.api.deps import (
+    get_core_store,
+    get_embeddings,
+    get_llm,
+    get_storage,
+    require_super_admin,
+)
 from app.core.config import Settings, get_settings
 from app.db.models import (
     MethodologyEdge,
@@ -43,7 +49,12 @@ from app.services.problem_routing_service import ProblemRoutingService
 from app.services.storage import LocalStorage
 from app.services.vector_store import VectorStore
 
-router = APIRouter(prefix="/api/methodology", tags=["methodology"])
+# 整个知识内核（节点库/图谱/路由规则/核心资料）仅超级管理员可访问
+router = APIRouter(
+    prefix="/api/methodology",
+    tags=["methodology"],
+    dependencies=[Depends(require_super_admin)],
+)
 
 _ALLOWED_SUFFIXES = {".pdf", ".docx", ".txt", ".md", ".pptx"}
 

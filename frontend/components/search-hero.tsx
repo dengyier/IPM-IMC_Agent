@@ -1,11 +1,18 @@
 "use client";
 
+import { useRef } from "react";
 import { Icon } from "./icon";
 import { suggestionChips } from "@/lib/data";
 import { useAssistant } from "./assistant-context";
 
 export function SearchHero() {
   const { input, loading, setInput, sendQuestion } = useAssistant();
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  function fillDraft(question: string) {
+    setInput(question);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
 
   return (
     <div>
@@ -18,6 +25,7 @@ export function SearchHero() {
       >
         <Icon name="search" className="h-5 w-5 text-[#65719a]" />
         <input
+          ref={inputRef}
           value={input}
           onChange={(event) => setInput(event.target.value)}
           className="flex-1 bg-transparent text-[14px] text-ink outline-none placeholder:text-[#8c96b8]"
@@ -38,7 +46,7 @@ export function SearchHero() {
           <button
             key={chip}
             disabled={loading}
-            onClick={() => sendQuestion(chip)}
+            onClick={() => fillDraft(chip)}
             className="rounded-full border border-[#dfe5ff] bg-[#f4f2ff] px-3.5 py-1.5 text-[12.5px] font-medium text-brand transition-colors hover:border-brand hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
           >
             <span className="mr-1.5 inline-block h-3 w-3 rounded-[4px] border border-brand/50 align-[-1px]" />

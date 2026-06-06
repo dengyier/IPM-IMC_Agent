@@ -25,6 +25,7 @@ class ExpansionSource(Base):
     __tablename__ = "expansion_sources"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    tenant_id: Mapped[str | None] = mapped_column(String(36), index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     # classmate_note / case / article / external_view / practice_feedback / scenario
     source_type: Mapped[str] = mapped_column(String(60), nullable=False, default="classmate_note")
@@ -34,7 +35,7 @@ class ExpansionSource(Base):
     source_layer: Mapped[str] = mapped_column(String(40), default="expansion")
     visibility: Mapped[str] = mapped_column(String(40), default="team")
     authority_level: Mapped[int] = mapped_column(Integer, default=40)
-    # uploaded / absorbed / reviewed
+    # uploaded / pending_review / reviewed / extraction_empty
     status: Mapped[str] = mapped_column(String(40), default="uploaded")
     meta: Mapped[dict] = mapped_column(JsonType, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
@@ -54,6 +55,7 @@ class ExpansionChunk(Base):
     __tablename__ = "expansion_chunks"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    tenant_id: Mapped[str | None] = mapped_column(String(36), index=True)
     source_id: Mapped[str] = mapped_column(
         ForeignKey("expansion_sources.id"), nullable=False
     )
@@ -75,6 +77,7 @@ class ExpansionItem(Base):
     __tablename__ = "expansion_items"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    tenant_id: Mapped[str | None] = mapped_column(String(36), index=True)
     source_id: Mapped[str] = mapped_column(
         ForeignKey("expansion_sources.id"), nullable=False
     )
@@ -106,6 +109,7 @@ class ReviewTask(Base):
     __tablename__ = "review_tasks"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    tenant_id: Mapped[str | None] = mapped_column(String(36), index=True)
     item_id: Mapped[str] = mapped_column(
         ForeignKey("expansion_items.id"), nullable=False
     )

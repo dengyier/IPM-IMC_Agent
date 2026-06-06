@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Card } from "@/components/card";
 import { Icon } from "@/components/icon";
@@ -11,8 +11,29 @@ import {
   ExpansionSource,
   expansionApi,
 } from "@/lib/api";
-import { extensionTypeLabel, reviewStatusTone } from "@/lib/presentation";
+import {
+  extensionTypeLabel,
+  reviewStatusTone,
+  sourceStatusTone,
+  sourceTypeLabel,
+} from "@/lib/presentation";
 import { cn } from "@/lib/utils";
+
+const LIBRARY_PAGE_SIZE = 8;
+
+function fmtTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function fmtSize(bytes: number | null): string {
+  if (bytes == null) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
 
 const STEPS = [
   { title: "提交资料", desc: "上传或粘贴外部资料" },
@@ -37,6 +58,7 @@ export function NoteEvolutionPage() {
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [absorb, setAbsorb] = useState<AbsorbResult | null>(null);
   const [items, setItems] = useState<ExpansionItemDetail[]>([]);
+  const [refreshSignal, setRefreshSignal] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const canSubmit =
@@ -77,6 +99,7 @@ export function NoteEvolutionPage() {
 
       setPhase("done");
       setStatusMsg(null);
+      setRefreshSignal((n) => n + 1); // 通知下方资料列表刷新
     } catch (e) {
       setPhase("error");
       setStatusMsg(e instanceof ApiError ? `处理失败：${e.message}` : "处理失败");
@@ -115,6 +138,7 @@ export function NoteEvolutionPage() {
           onSubmit={handleSubmit}
         />
         {absorb && <AnalysisResult absorb={absorb} items={items} />}
+        <ExpansionLibrary refreshSignal={refreshSignal} />
         <p className="py-5 text-center text-[12px] text-slate-400">
           外部资料仅进入扩展层，必须经人工审核后方可演进核心节点版本
         </p>
@@ -518,5 +542,259 @@ function NoteAside() {
         </div>
       </Card>
     </aside>
+  );
+}
+
+// 外部资料列表：知识扩展页内直接管理已上传的外部资料（吸收 / 去审核 / 状态跟踪）。
+function ExpansionLibrary({ refreshSignal }: { refreshSignal: number }) {
+  const [sources, setSources] = useState<ExpansionSource[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await expansionApi.sources();
+      setSources(
+        [...data].sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+      );
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "加载资料失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, [refreshSignal]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sources;
+    return sources.filter((s) => s.title.toLowerCase().includes(q));
+  }, [sources, query]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / LIBRARY_PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageItems = filtered.slice(
+    (safePage - 1) * LIBRARY_PAGE_SIZE,
+    safePage * LIBRARY_PAGE_SIZE
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [query]);
+
+  async function runAction(s: ExpansionSource) {
+    if (busyId) return;
+    if (s.status === "absorbed" || s.status === "pending_review") {
+      window.location.href = "/review";
+      return;
+    }
+    if (s.status === "reviewed") return;
+    setBusyId(s.id);
+    setToast(null);
+    try {
+      const res = await expansionApi.absorb(s.id);
+      setToast(
+        res.review_task_count > 0
+          ? `已进入人工审核：${res.chunk_count} 切块 → ${res.item_count} 条目 / ${res.review_task_count} 个审核任务`
+          : `未抽取到可审核条目：${res.chunk_count} 切块 / ${res.item_count} 条目，请确认资料是否为扫描件或内容是否可解析`
+      );
+      await load();
+    } catch (e) {
+      setToast(e instanceof ApiError ? `操作失败：${e.message}` : "操作失败");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <Card className="mt-5 overflow-hidden">
+      <div className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-4">
+        <h2 className="text-[16px] font-black text-ink">外部资料</h2>
+        <span className="text-[13px] text-slate-500">共 {filtered.length} 条</span>
+        <div className="ml-auto flex items-center gap-3">
+          <div className="flex h-9 w-[240px] items-center gap-2 rounded-lg border border-line bg-white px-3">
+            <Icon name="search" className="h-4 w-4 text-slate-400" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-slate-400"
+              placeholder="搜索资料名称..."
+            />
+          </div>
+          <button
+            onClick={load}
+            className="flex h-9 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-[13px] font-bold text-[#172452] hover:text-brand"
+          >
+            <Icon name="refresh" className="h-4 w-4" />
+            刷新
+          </button>
+        </div>
+      </div>
+
+      {toast && (
+        <div className="mx-5 mt-4 rounded-xl border border-brand/30 bg-[#f5f3ff] px-4 py-2.5 text-[12.5px] font-semibold text-brand">
+          {toast}
+        </div>
+      )}
+
+      <div className="px-5 pb-5 pt-4">
+        <div className="grid grid-cols-[1.8fr_0.9fr_0.7fr_1fr_0.8fr_0.9fr] rounded-t-xl bg-[#f7f9fd] px-3 py-3 text-[12px] font-bold text-slate-500">
+          <span>资料名称</span>
+          <span>类型</span>
+          <span>上传人</span>
+          <span>上传时间</span>
+          <span>状态</span>
+          <span>操作</span>
+        </div>
+
+        {loading && <p className="py-10 text-center text-[13px] text-slate-400">加载中…</p>}
+        {error && !loading && <p className="py-10 text-center text-[13px] text-rose-500">{error}</p>}
+        {!loading && !error && pageItems.length === 0 && (
+          <p className="py-10 text-center text-[13px] text-slate-400">暂无外部资料，请在上方提交</p>
+        )}
+
+        <div className="divide-y divide-line">
+          {!loading &&
+            !error &&
+            pageItems.map((s) => (
+              <ExpansionRow
+                key={s.id}
+                source={s}
+                busy={busyId === s.id}
+                disabled={busyId !== null && busyId !== s.id}
+                onAction={() => runAction(s)}
+              />
+            ))}
+        </div>
+
+        {totalPages > 1 && (
+          <div className="mt-4 flex items-center justify-center gap-2">
+            <LibPageBtn disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>
+              <Icon name="chevron-left" className="h-4 w-4" />
+            </LibPageBtn>
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPage(p)}
+                className={cn(
+                  "h-9 w-9 rounded-lg border text-[13px] font-semibold",
+                  p === safePage ? "border-brand text-brand" : "border-line bg-white text-slate-600"
+                )}
+              >
+                {p}
+              </button>
+            ))}
+            <LibPageBtn disabled={safePage >= totalPages} onClick={() => setPage(safePage + 1)}>
+              <Icon name="chevron-right" className="h-4 w-4" />
+            </LibPageBtn>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function ExpansionRow({
+  source,
+  busy,
+  disabled,
+  onAction,
+}: {
+  source: ExpansionSource;
+  busy: boolean;
+  disabled: boolean;
+  onAction: () => void;
+}) {
+  const st = sourceStatusTone[source.status] ?? {
+    label: source.status,
+    tone: "bg-slate-100 text-slate-500",
+  };
+  const size = typeof source.meta?.size === "number" ? (source.meta.size as number) : null;
+
+  // 外部资料行动作：uploaded→吸收；extraction_empty→重新吸收；absorbed/pending_review→去审核；reviewed→已完成。
+  let actionLabel = "吸收";
+  let actionDisabled = false;
+  if (source.status === "absorbed" || source.status === "pending_review") {
+    actionLabel = "去审核";
+  } else if (source.status === "reviewed") {
+    actionLabel = "已完成";
+    actionDisabled = true;
+  } else if (source.status === "rejected") {
+    actionLabel = "已驳回";
+    actionDisabled = true;
+  } else if (source.status === "extraction_empty") {
+    actionLabel = "重新吸收";
+  }
+
+  return (
+    <div className="grid grid-cols-[1.8fr_0.9fr_0.7fr_1fr_0.8fr_0.9fr] items-center px-3 py-3.5 text-[13px]">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-orange-400 text-white">
+          <Icon name="file-text" className="h-4 w-4" />
+        </div>
+        <div className="min-w-0">
+          <div className="truncate font-semibold text-ink">{source.title}</div>
+          <div className="mt-0.5 text-[11px] text-slate-400">{fmtSize(size)}</div>
+        </div>
+      </div>
+      <span className="w-fit rounded-full bg-orange-50 px-2.5 py-1 text-[12px] font-semibold text-orange-500">
+        {sourceTypeLabel(source.source_type)}
+      </span>
+      <span className="text-slate-600">{source.submitted_by || "—"}</span>
+      <span className="text-slate-600">{fmtTime(source.created_at)}</span>
+      <span className={cn("inline-flex w-fit items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-semibold", st.tone)}>
+        {st.label}
+      </span>
+      <div>
+        <button
+          onClick={onAction}
+          disabled={disabled || actionDisabled || busy}
+          className={cn(
+            "flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12px] font-bold transition-colors",
+            actionDisabled
+              ? "cursor-default text-slate-400"
+              : "border border-brand/40 text-brand hover:bg-[#f5f3ff] disabled:opacity-40"
+          )}
+        >
+          {busy ? (
+            <>
+              <Icon name="refresh" className="h-3.5 w-3.5 animate-spin" />
+              处理中
+            </>
+          ) : (
+            actionLabel
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function LibPageBtn({
+  children,
+  disabled,
+  onClick,
+}: {
+  children: React.ReactNode;
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      disabled={disabled}
+      onClick={onClick}
+      className="flex h-9 w-9 items-center justify-center rounded-lg border border-line bg-white text-slate-500 disabled:opacity-40"
+    >
+      {children}
+    </button>
   );
 }

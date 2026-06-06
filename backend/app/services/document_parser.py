@@ -7,6 +7,9 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -153,7 +156,55 @@ def _parse_pdf_pages(path: Path) -> list[tuple[int, str]]:
             text = (page.get_text() or "").strip()
             if text:
                 pages.append((number, text))
-    return pages or [(1, "")]
+    if sum(len(text) for _, text in pages) >= 80:
+        return pages
+    return _ocr_pdf_pages(path) or pages or [(1, "")]
+
+
+def _ocr_pdf_pages(path: Path, max_pages: int = 120) -> list[tuple[int, str]]:
+    """OCR 兜底：处理扫描件/图片型 PDF。
+
+    依赖系统 tesseract；生产环境未安装时安静退回空结果，让上层标记为抽取为空。
+    """
+    if not shutil.which("tesseract"):
+        return []
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        return []
+
+    pages: list[tuple[int, str]] = []
+    with tempfile.TemporaryDirectory(prefix="imc_ipm_ocr_") as tmp:
+        tmp_dir = Path(tmp)
+        with fitz.open(str(path)) as doc:
+            for index, page in enumerate(doc, start=1):
+                if index > max_pages:
+                    break
+                image_path = tmp_dir / f"page-{index}.png"
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+                pix.save(str(image_path))
+                try:
+                    result = subprocess.run(
+                        [
+                            "tesseract",
+                            str(image_path),
+                            "stdout",
+                            "-l",
+                            "chi_sim+eng",
+                            "--psm",
+                            "6",
+                        ],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=45,
+                    )
+                except (subprocess.SubprocessError, OSError):
+                    continue
+                text = clean_text(result.stdout or "")
+                if text:
+                    pages.append((index, text))
+    return pages
 
 
 def _parse_docx(path: Path) -> str:

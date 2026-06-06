@@ -39,12 +39,14 @@ class BusinessCanvasDiagnosisGraph:
         embeddings: EmbeddingProvider,
         core_store: VectorStore,
         llm: LLMService | None = None,
+        tenant_id: str | None = None,
     ) -> None:
         self.db = db
         self.settings = settings
         self.embeddings = embeddings
         self.core_store = core_store
         self.llm = llm
+        self.tenant_id = tenant_id
         self.routing_svc = ProblemRoutingService(db)
         self.fusion_svc = ContextFusionService(db, embeddings, core_store)
         self.diagnosis_svc = DiagnosisService(llm)
@@ -65,7 +67,9 @@ class BusinessCanvasDiagnosisGraph:
             )
 
             # 2. fuse
-            context = self.fusion_svc.fuse(request.question, routing, request.canvas)
+            context = self.fusion_svc.fuse(
+                request.question, routing, request.canvas, tenant_id=self.tenant_id
+            )
             trace.append(
                 f"上下文融合：节点 {len(context.nodes)}、核心切块 {len(context.core_chunks)}(内部)、"
                 f"已审核扩展 {len(context.approved_expansions)}、案例 {len(context.cases)}，"
@@ -77,6 +81,7 @@ class BusinessCanvasDiagnosisGraph:
             trace.append(f"生成诊断报告（{'LLM' if used_llm else '本地回退'}）")
 
             report = DiagnosisReport(
+                tenant_id=self.tenant_id,
                 title=request.title,
                 company_name=request.company_name,
                 question=request.question,
@@ -107,6 +112,7 @@ class BusinessCanvasDiagnosisGraph:
             # 4. quality check
             qc = self.quality_svc.check(payload, context, request.canvas)
             quality = ReportQualityCheck(
+                tenant_id=self.tenant_id,
                 report_id=report.id,
                 overall_score=qc["overall_score"],
                 dimension_scores=qc["dimension_scores"],
@@ -145,6 +151,7 @@ class BusinessCanvasDiagnosisGraph:
 
     def _start_run(self, graph_name: str, input_payload: dict[str, Any]) -> AgentRun:
         run = AgentRun(
+            tenant_id=self.tenant_id,
             graph_name=graph_name,
             input=input_payload,
             status="running",

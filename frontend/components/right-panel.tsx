@@ -4,21 +4,47 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent } from "react";
 
 import { Icon } from "./icon";
-import { Card } from "./card";
-import { assistantSkills } from "@/lib/data";
+import type { AssistantAttachment } from "@/lib/api";
+import { ApiError, assistantApi } from "@/lib/api";
+import { suggestionChips } from "@/lib/data";
 import { useAssistant } from "./assistant-context";
 import { useAuth } from "./auth-context";
+import { PendingTaskBell } from "./pending-task-bell";
 import { cn } from "@/lib/utils";
 
-export function RightPanel() {
+// 工作台首页对话工作区：左侧全局导航之外的「中·对话主区 + 右·会话列表（可收起）」。
+
+function titleFromQuestion(question: string): string {
+  const title = question.trim().replace(/\s+/g, " ");
+  return title.length > 28 ? `${title.slice(0, 28)}...` : title;
+}
+
+function isPlaceholderTitle(title?: string | null): boolean {
+  return !title || ["新会话", "历史会话"].includes(title.trim());
+}
+
+function titleFromActiveMessages(messages: ReturnType<typeof useAssistant>["messages"]): string | null {
+  const firstUserMessage = messages.find((message) => message.role === "user");
+  return firstUserMessage ? titleFromQuestion(firstUserMessage.content) : null;
+}
+
+export function HomeWorkspace() {
+  const [convOpen, setConvOpen] = useState(true);
   return (
-    <div className="sticky top-6 flex h-[calc(100vh-128px)] min-h-0 w-full flex-col">
-      <AiAssistant />
+    <div className="flex h-screen min-w-0 flex-1 overflow-hidden">
+      <ChatMain convOpen={convOpen} onToggleConv={() => setConvOpen((v) => !v)} />
+      {convOpen && <ConversationPanel onCollapse={() => setConvOpen(false)} />}
     </div>
   );
 }
 
-function AiAssistant() {
+function ChatMain({
+  convOpen,
+  onToggleConv,
+}: {
+  convOpen: boolean;
+  onToggleConv: () => void;
+}) {
   const {
     input,
     messages,
@@ -28,201 +54,443 @@ function AiAssistant() {
     historyLoading,
     setInput,
     sendQuestion,
-    createConversation,
   } = useAssistant();
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const [focusOpen, setFocusOpen] = useState(false);
   const { user } = useAuth();
+  const endRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [focusOpen, setFocusOpen] = useState(false);
+  const [attachment, setAttachment] = useState<{ name: string; text: string; truncated: boolean; chars: number } | null>(null);
+  const [attaching, setAttaching] = useState(false);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const canSend = input.trim().length > 0 && !loading && !attaching;
+  const hasConversation = messages.some((message) => message.role === "user");
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeConversationId),
     [activeConversationId, conversations]
   );
-  const canSend = input.trim().length > 0 && !loading;
+  const activeConversationTitle = useMemo(() => {
+    if (!activeConversation) return "";
+    if (!isPlaceholderTitle(activeConversation.title)) return activeConversation.title;
+    return titleFromActiveMessages(messages) || activeConversation.title;
+  }, [activeConversation, messages]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length, loading, historyLoading]);
+
+  async function handlePickFile(file: File) {
+    setAttaching(true);
+    setAttachError(null);
+    try {
+      const res = await assistantApi.parseFile(file);
+      if (!res.text.trim()) {
+        setAttachError("未能从该文件解析出文本内容。");
+        return;
+      }
+      setAttachment({ name: res.filename || file.name, text: res.text, truncated: res.truncated, chars: res.chars });
+    } catch (e) {
+      setAttachError(e instanceof ApiError ? `解析失败：${e.message}` : "文件解析失败");
+    } finally {
+      setAttaching(false);
+    }
+  }
+
+  async function submit(question?: string) {
+    if (loading || attaching) return;
+    const companyContext = attachment
+      ? `用户上传的文件《${attachment.name}》解析内容：\n${attachment.text}`
+      : undefined;
+    const messageAttachments: AssistantAttachment[] | undefined = attachment
+      ? [{ name: attachment.name, chars: attachment.chars, truncated: attachment.truncated }]
+      : undefined;
+    await sendQuestion(question, companyContext, messageAttachments);
+    setAttachment(null);
+  }
+
+  function fillDraft(question: string) {
+    setInput(question);
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key !== "Enter" || event.shiftKey) return;
     event.preventDefault();
-    if (canSend) {
-      sendQuestion();
-    }
+    if (canSend) submit();
   }
 
   return (
     <>
-    <Card className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="flex shrink-0 items-center gap-3 border-b border-line/70 px-6 pb-4 pt-5">
-        <div className="brand-gradient flex h-10 w-10 items-center justify-center rounded-xl shadow-soft">
-          <Icon name="boxes" className="h-5 w-5 text-white" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-[15px] font-black text-ink">IMC&IPM 智能助手</span>
-            <span className="rounded-md bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet">
-              AI
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {/* 顶部细条 */}
+        <div className="flex h-14 shrink-0 items-center justify-end gap-2 px-8">
+          {activeConversation && hasConversation && (
+            <span className="mr-auto inline-flex max-w-[50%] items-center gap-1.5 rounded-lg bg-[#f7f5ff] px-2.5 py-1 text-[11px] font-bold text-brand">
+              <Icon name="history" className="h-3.5 w-3.5" />
+              <span className="truncate">当前会话：{activeConversationTitle}</span>
             </span>
-          </div>
-          <div className="mt-0.5 text-[11px] font-medium text-slate-400">
-            基于核心知识节点与 DeepSeek 的商业决策对话
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => createConversation().catch(() => undefined)}
-            className="flex h-9 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-[12px] font-bold text-slate-600 transition-colors hover:text-brand"
-            title="开启新会话"
-          >
-            <Icon name="plus" className="h-3.5 w-3.5" />
-            新会话
-          </button>
+          )}
+          <PendingTaskBell />
           <button
             onClick={() => setFocusOpen(true)}
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-line bg-white text-slate-500 transition-colors hover:text-brand"
+            className="flex h-10 items-center gap-2 rounded-full px-3 text-[13px] font-bold text-[#172452] transition-colors hover:bg-white hover:text-brand"
             title="打开专注对话"
           >
-            <Icon name="panel" className="h-4 w-4" />
+            <Icon name="panel" className="h-[18px] w-[18px]" />
+            专注
+          </button>
+          <button className="flex h-10 w-10 items-center justify-center rounded-full text-[#172452] transition-colors hover:bg-white hover:text-brand">
+            <Icon name="help-circle" className="h-[19px] w-[19px]" />
+          </button>
+          <button
+            onClick={onToggleConv}
+            className={cn(
+              "flex h-10 items-center gap-2 rounded-full px-3 text-[13px] font-bold transition-colors hover:bg-white hover:text-brand",
+              convOpen ? "text-brand" : "text-[#172452]"
+            )}
+            title={convOpen ? "收起会话列表" : "展开会话列表"}
+          >
+            <Icon name="history" className="h-[18px] w-[18px]" />
+            会话
           </button>
         </div>
-      </div>
 
-      <div className="shrink-0 border-b border-line/70 px-6 py-4">
-        <div className="flex items-center gap-1.5 text-[15px] font-bold text-ink">
-          你好，{user?.display_name || "用户"} <span>👋</span>
-        </div>
-        <p className="mt-2 text-[13.5px] leading-6 text-slate-600">
-          你可以直接输入企业诉求。我会结合核心知识节点与 DeepSeek，给出基于 IMC&IPM 方法论的解决建议。
-        </p>
-        {activeConversation && (
-          <div className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-lg bg-[#f7f5ff] px-2.5 py-1 text-[11px] font-bold text-brand">
-            <Icon name="history" className="h-3.5 w-3.5" />
-            <span className="truncate">当前会话：{activeConversation.title}</span>
-          </div>
-        )}
-        <ul className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
-          {assistantSkills.map((s) => (
-            <li key={s} className="flex items-center gap-2 text-[12.5px] text-gray-600">
-              <span className="h-1.5 w-1.5 rounded-full bg-brand" />
-              {s}
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain bg-[#fbfcff] px-6 py-5">
-        {historyLoading && (
-          <div className="mx-auto w-full max-w-[980px] rounded-2xl border border-line bg-white px-4 py-3.5 text-[13px] text-slate-500 shadow-[0_10px_24px_rgba(30,58,138,0.05)]">
-            正在恢复历史会话...
-          </div>
-        )}
-        {messages.map((message) => (
-          <div key={message.id} className="mx-auto w-full max-w-[980px]">
-            <div
-              className={cn(
-                "rounded-2xl px-4 py-3.5 text-[13px] leading-6",
-                message.role === "user"
-                  ? "ml-auto max-w-[680px] bg-brand text-white shadow-[0_12px_28px_rgba(91,75,255,0.18)]"
-                  : "max-w-[920px] border border-line bg-white text-slate-650 shadow-[0_10px_24px_rgba(30,58,138,0.05)]"
+        {/* 中部：Hero（空状态）或消息流 */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-8">
+          {!hasConversation ? (
+            <HomeHero
+              displayName={user?.display_name || "用户"}
+              loading={loading}
+              onDraft={fillDraft}
+            />
+          ) : (
+            <div className="mx-auto w-full max-w-[900px] space-y-4 py-6">
+              {historyLoading && (
+                <div className="rounded-2xl border border-line bg-white px-4 py-3.5 text-[13px] text-slate-500 shadow-[0_10px_24px_rgba(30,58,138,0.05)]">
+                  正在恢复历史会话...
+                </div>
               )}
-            >
-            <div className="whitespace-pre-line">{message.content}</div>
-            {message.nodeRefs && message.nodeRefs.length > 0 && (
-              <div className="mt-3 border-t border-line/70 pt-2">
-                <div className="text-[11.5px] font-bold text-slate-400">
-                  引用知识节点{message.usedLlm ? " · DeepSeek 已参与生成" : " · 本地兜底生成"}
+              {messages.map((message) => (
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  loading={loading}
+                  onDraft={fillDraft}
+                />
+              ))}
+              {loading && (
+                <div className="max-w-[820px] rounded-2xl border border-line bg-white px-4 py-3.5 text-[13px] text-slate-500 shadow-[0_10px_24px_rgba(30,58,138,0.05)]">
+                  正在检索 IMC&IPM 核心知识节点，并调用 DeepSeek 生成解决方案...
                 </div>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {message.nodeRefs.slice(0, 4).map((node) => (
-                    <a
-                      key={node.id}
-                      href={`/knowledge-nodes?q=${encodeURIComponent(node.name)}`}
-                      className="rounded-md bg-[#f0edff] px-2 py-1 text-[11px] font-bold text-brand"
+              )}
+              <div ref={endRef} />
+            </div>
+          )}
+        </div>
+
+        {/* 底部输入条 */}
+        <div className="shrink-0 px-8 pb-6 pt-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.docx,.txt,.md,.pptx,.xlsx"
+            className="hidden"
+            onChange={(event) => {
+              const f = event.target.files?.[0];
+              if (f) handlePickFile(f);
+              if (fileInputRef.current) fileInputRef.current.value = "";
+            }}
+          />
+          <div className="mx-auto w-full max-w-[900px]">
+            {(attachment || attaching || attachError) && (
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                {attaching && (
+                  <span className="inline-flex items-center gap-1.5 rounded-lg bg-[#f5f3ff] px-3 py-1.5 text-[12px] font-semibold text-brand">
+                    <Icon name="refresh" className="h-3.5 w-3.5 animate-spin" />
+                    正在解析文件…
+                  </span>
+                )}
+                {attachment && !attaching && (
+                  <span className="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-1.5 text-[12px] font-semibold text-[#172452]">
+                    <Icon name="file-text" className="h-3.5 w-3.5 text-brand" />
+                    <span className="max-w-[260px] truncate">{attachment.name}</span>
+                    {attachment.truncated && <span className="text-[11px] text-amber-600">已截断</span>}
+                    <button
+                      type="button"
+                      onClick={() => setAttachment(null)}
+                      className="text-slate-400 hover:text-rose-500"
+                      title="移除附件"
                     >
-                      {node.name}
-                    </a>
-                  ))}
-                </div>
+                      <Icon name="x" className="h-3.5 w-3.5" />
+                    </button>
+                  </span>
+                )}
+                {attachError && (
+                  <span className="text-[12px] font-semibold text-rose-500">{attachError}</span>
+                )}
               </div>
             )}
-            {message.role === "assistant" &&
-              message.suggestedQuestions &&
-              message.suggestedQuestions.length > 0 && (
-                <div className="mt-3 border-t border-line/70 pt-2">
-                  <div className="text-[11.5px] font-bold text-slate-400">建议继续追问</div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {message.suggestedQuestions.slice(0, 4).map((question) => (
-                      <button
-                        key={question}
-                        disabled={loading}
-                        onClick={() => sendQuestion(question)}
-                        className="w-fit max-w-full rounded-lg bg-[#f7f5ff] px-3 py-2 text-left text-[12.5px] font-semibold leading-5 text-brand transition-colors hover:bg-[#eeeaff] disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {question}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            {message.action && (
-              <a
-                href={message.action.href}
-                className={cn(
-                  "mt-3 inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[12px] font-bold",
-                  message.role === "user"
-                    ? "bg-white/15 text-white"
-                    : "bg-[#f0edff] text-brand hover:bg-[#e8e4ff]"
-                )}
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (canSend) submit();
+              }}
+              className="flex items-end gap-2 rounded-[24px] border border-line bg-white py-3 pl-3 pr-3 shadow-[0_18px_50px_rgba(15,23,42,0.10)] transition-colors focus-within:border-brand/50"
+            >
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={attaching}
+                className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-50 hover:text-brand disabled:opacity-50"
+                title="上传文件（PDF / DOCX / PPTX / XLSX / TXT / MD），解析后随诉求一起发送"
               >
-                {message.action.label}
-                <Icon name="chevron-right" className="h-3.5 w-3.5" />
-              </a>
-            )}
-            </div>
+                <Icon name="plus" className="h-5 w-5" />
+              </button>
+              <textarea
+                ref={composerRef}
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={handleComposerKeyDown}
+                rows={1}
+                className="block max-h-32 min-h-[44px] flex-1 resize-none bg-transparent py-2 text-[15px] leading-6 text-ink outline-none placeholder:text-slate-400"
+                placeholder={attachment ? "针对已上传文件提问，尽管问…" : "输入企业诉求，尽管问…"}
+              />
+              <button
+                type="submit"
+                disabled={!canSend}
+                className="brand-gradient mb-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white shadow-soft transition disabled:cursor-not-allowed disabled:opacity-45"
+                title={loading ? "正在生成" : "发送"}
+              >
+                <Icon name={loading ? "refresh" : "send"} className={cn("h-5 w-5", loading && "animate-spin")} />
+              </button>
+            </form>
+            <p className="mt-2 text-center text-[11px] text-slate-400">
+              回答由 AI 结合 IMC&IPM 核心知识节点生成，仅供决策参考。
+            </p>
           </div>
+        </div>
+      </main>
+      {focusOpen && <AssistantFocusMode onClose={() => setFocusOpen(false)} />}
+    </>
+  );
+}
+
+function HomeHero({
+  displayName,
+  loading,
+  onDraft,
+}: {
+  displayName: string;
+  loading: boolean;
+  onDraft: (question: string) => void;
+}) {
+  return (
+    <div className="mx-auto flex min-h-full max-w-[760px] flex-col items-center justify-center py-10 text-center">
+      <div className="brand-gradient flex h-14 w-14 items-center justify-center rounded-2xl shadow-soft ring-8 ring-indigo-50/60">
+        <Icon name="boxes" className="h-7 w-7 text-white" />
+      </div>
+      <h1 className="mt-5 text-[30px] font-black tracking-[-0.03em] text-ink">
+        你好，{displayName}
+      </h1>
+      <p className="mt-3 max-w-[560px] text-[14px] leading-7 text-slate-500">
+        输入企业诉求，我会结合 IMC&IPM 核心方法论、知识节点与已沉淀案例，帮你形成可执行的商业判断。
+      </p>
+      <div className="mt-8 grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
+        {suggestionChips.map((question) => (
+          <button
+            key={question}
+            disabled={loading}
+            onClick={() => onDraft(question)}
+            className="rounded-2xl border border-line bg-white px-4 py-3.5 text-left text-[13px] font-bold text-[#172452] shadow-[0_10px_28px_rgba(30,58,138,0.05)] transition-colors hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {question}
+          </button>
         ))}
-        {loading && (
-          <div className="mx-auto w-full max-w-[980px]">
-            <div className="max-w-[920px] rounded-2xl border border-line bg-white px-4 py-3.5 text-[13px] text-slate-500 shadow-[0_10px_24px_rgba(30,58,138,0.05)]">
-              正在检索 IMC&IPM 核心知识节点，并调用 DeepSeek 生成解决方案...
+      </div>
+    </div>
+  );
+}
+
+function AttachmentCard({
+  attachment,
+  tone = "default",
+}: {
+  attachment: AssistantAttachment;
+  tone?: "default" | "sent";
+}) {
+  const sizeText =
+    typeof attachment.chars === "number" && attachment.chars > 0
+      ? `${attachment.chars.toLocaleString()} 字`
+      : "已随问题发送";
+  return (
+    <div
+      className={cn(
+        "flex max-w-full items-center gap-2 rounded-xl border px-3 py-2 text-left",
+        tone === "sent"
+          ? "border-white/20 bg-white/15 text-white"
+          : "border-line bg-[#f8faff] text-[#172452]"
+      )}
+    >
+      <span
+        className={cn(
+          "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
+          tone === "sent" ? "bg-white/15" : "bg-[#f0edff]"
+        )}
+      >
+        <Icon name="file-text" className={cn("h-4 w-4", tone === "sent" ? "text-white" : "text-brand")} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[12.5px] font-bold">{attachment.name}</span>
+        <span className={cn("block text-[11px]", tone === "sent" ? "text-white/75" : "text-slate-400")}>
+          {sizeText}
+          {attachment.truncated ? " · 内容较长，已截取前段用于分析" : ""}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+function MessageBubble({
+  message,
+  loading,
+  onDraft,
+}: {
+  message: ReturnType<typeof useAssistant>["messages"][number];
+  loading: boolean;
+  onDraft: (question: string) => void;
+}) {
+  return (
+    <div className="w-full">
+      <div
+        className={cn(
+          "rounded-2xl px-4 py-3.5 text-[13px] leading-6",
+          message.role === "user"
+            ? "ml-auto max-w-[680px] bg-brand text-white shadow-[0_12px_28px_rgba(91,75,255,0.18)]"
+            : "max-w-[820px] border border-line bg-white text-slate-650 shadow-[0_10px_24px_rgba(30,58,138,0.05)]"
+        )}
+      >
+        <div className="whitespace-pre-line">{message.content}</div>
+        {message.attachments && message.attachments.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {message.attachments.map((attachment) => (
+              <AttachmentCard
+                key={`${message.id}-${attachment.name}`}
+                attachment={attachment}
+                tone={message.role === "user" ? "sent" : "default"}
+              />
+            ))}
+          </div>
+        )}
+        {message.nodeRefs && message.nodeRefs.length > 0 && (
+          <div className="mt-3 border-t border-line/70 pt-2">
+            <div className="text-[11.5px] font-bold text-slate-400">
+              引用知识节点{message.usedLlm ? " · DeepSeek 已参与生成" : " · 本地兜底生成"}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {message.nodeRefs.slice(0, 4).map((node) => (
+                <a
+                  key={node.id}
+                  href={`/knowledge-nodes?q=${encodeURIComponent(node.name)}`}
+                  className="rounded-md bg-[#f0edff] px-2 py-1 text-[11px] font-bold text-brand"
+                >
+                  {node.name}
+                </a>
+              ))}
             </div>
           </div>
         )}
-        <div ref={messagesEndRef} />
-      </div>
-
-      <div className="shrink-0 border-t border-line/70 bg-white px-6 py-5">
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (canSend) {
-              sendQuestion();
-            }
-          }}
-          className="relative rounded-[22px] border border-line bg-white py-3 pl-4 pr-[68px] shadow-[0_12px_34px_rgba(30,58,138,0.08)] transition-colors focus-within:border-brand/50"
-        >
-          <textarea
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={handleComposerKeyDown}
-            rows={1}
-            className="block max-h-28 min-h-[44px] w-full resize-none bg-transparent py-2 text-[14px] leading-6 text-ink outline-none placeholder:text-slate-400"
-            placeholder="继续提问..."
-          />
-          <button
-            type="submit"
-            disabled={!canSend}
-            className="brand-gradient absolute right-3 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-white shadow-soft transition disabled:cursor-not-allowed disabled:opacity-45"
-            title={loading ? "正在生成" : "发送"}
+        {message.role === "assistant" &&
+          message.suggestedQuestions &&
+          message.suggestedQuestions.length > 0 && (
+            <div className="mt-3 border-t border-line/70 pt-2">
+              <div className="text-[11.5px] font-bold text-slate-400">建议继续追问</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {message.suggestedQuestions.slice(0, 4).map((question) => (
+                  <button
+                    key={question}
+                    disabled={loading}
+                    onClick={() => onDraft(question)}
+                    className="w-fit max-w-full rounded-lg bg-[#f7f5ff] px-3 py-2 text-left text-[12.5px] font-semibold leading-5 text-brand transition-colors hover:bg-[#eeeaff] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {question}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        {message.action && (
+          <a
+            href={message.action.href}
+            className={cn(
+              "mt-3 inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[12px] font-bold",
+              message.role === "user"
+                ? "bg-white/15 text-white"
+                : "bg-[#f0edff] text-brand hover:bg-[#e8e4ff]"
+            )}
           >
-            <Icon name={loading ? "refresh" : "send"} className={cn("h-5 w-5", loading && "animate-spin")} />
-          </button>
-        </form>
+            {message.action.label}
+            <Icon name="chevron-right" className="h-3.5 w-3.5" />
+          </a>
+        )}
       </div>
-    </Card>
-    {focusOpen && <AssistantFocusMode onClose={() => setFocusOpen(false)} />}
-    </>
+    </div>
+  );
+}
+
+function ConversationPanel({ onCollapse }: { onCollapse: () => void }) {
+  const {
+    messages,
+    conversations,
+    activeConversationId,
+    createConversation,
+    selectConversation,
+    deleteConversation,
+  } = useAssistant();
+
+  return (
+    <aside className="flex h-screen w-[300px] shrink-0 flex-col border-l border-line bg-white/60 backdrop-blur-xl">
+      <div className="flex h-14 shrink-0 items-center justify-between px-4">
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={onCollapse}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white hover:text-brand"
+            title="收起会话列表"
+          >
+            <Icon name="chevron-right" className="h-4 w-4" />
+          </button>
+          <div className="text-[15px] font-black text-ink">对话</div>
+        </div>
+        <button
+          onClick={() => createConversation().catch(() => undefined)}
+          className="flex h-9 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-[12px] font-bold text-slate-600 transition-colors hover:text-brand"
+          title="开启新会话"
+        >
+          <Icon name="plus" className="h-3.5 w-3.5" />
+          新对话
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-4 pt-1">
+        {conversations.length === 0 && (
+          <div className="px-2 py-8 text-center text-[12.5px] leading-5 text-slate-400">
+            暂无会话，开始提问即可创建。
+          </div>
+        )}
+        {conversations.map((conversation) => (
+          <ConversationListItem
+            key={conversation.id}
+            conversation={conversation}
+            active={conversation.id === activeConversationId}
+            displayTitle={
+              conversation.id === activeConversationId && isPlaceholderTitle(conversation.title)
+                ? titleFromActiveMessages(messages) || conversation.title
+                : conversation.title
+            }
+            onSelect={() => selectConversation(conversation.id)}
+            onDelete={() => deleteConversation(conversation.id)}
+          />
+        ))}
+      </div>
+    </aside>
   );
 }
 
@@ -241,6 +509,7 @@ function AssistantFocusMode({ onClose }: { onClose: () => void }) {
     deleteConversation,
   } = useAssistant();
   const endRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [searchKeyword, setSearchKeyword] = useState("");
   const { user } = useAuth();
   const canSend = input.trim().length > 0 && !loading;
@@ -261,6 +530,11 @@ function AssistantFocusMode({ onClose }: { onClose: () => void }) {
     if (canSend) {
       sendQuestion();
     }
+  }
+
+  function fillDraft(question: string) {
+    setInput(question);
+    requestAnimationFrame(() => composerRef.current?.focus());
   }
 
   return (
@@ -309,6 +583,11 @@ function AssistantFocusMode({ onClose }: { onClose: () => void }) {
                 key={conversation.id}
                 conversation={conversation}
                 active={conversation.id === activeConversationId}
+                displayTitle={
+                  conversation.id === activeConversationId && isPlaceholderTitle(conversation.title)
+                    ? titleFromActiveMessages(messages) || conversation.title
+                    : conversation.title
+                }
                 onSelect={() => selectConversation(conversation.id)}
                 onDelete={() => deleteConversation(conversation.id)}
               />
@@ -363,7 +642,7 @@ function AssistantFocusMode({ onClose }: { onClose: () => void }) {
                   ].map((question) => (
                     <button
                       key={question}
-                      onClick={() => sendQuestion(question)}
+                      onClick={() => fillDraft(question)}
                       className="rounded-2xl border border-line bg-white px-4 py-3 text-left text-[13px] font-bold text-[#172452] shadow-[0_10px_28px_rgba(30,58,138,0.05)] hover:border-brand/40 hover:text-brand"
                     >
                       {question}
@@ -376,7 +655,7 @@ function AssistantFocusMode({ onClose }: { onClose: () => void }) {
             {hasConversation && (
               <div className="mx-auto max-w-[900px] space-y-7">
                 {messages.map((message) => (
-                  <FocusMessage key={message.id} message={message} loading={loading} onAsk={sendQuestion} />
+                  <FocusMessage key={message.id} message={message} loading={loading} onDraft={fillDraft} />
                 ))}
                 {loading && (
                   <div className="flex gap-4">
@@ -412,6 +691,7 @@ function AssistantFocusMode({ onClose }: { onClose: () => void }) {
                 <Icon name="plus" className="h-5 w-5" />
               </button>
               <textarea
+                ref={composerRef}
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={handleComposerKeyDown}
@@ -438,17 +718,24 @@ function AssistantFocusMode({ onClose }: { onClose: () => void }) {
 function FocusMessage({
   message,
   loading,
-  onAsk,
+  onDraft,
 }: {
   message: ReturnType<typeof useAssistant>["messages"][number];
   loading: boolean;
-  onAsk: (question?: string) => Promise<void>;
+  onDraft: (question: string) => void;
 }) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
         <div className="max-w-[76%] rounded-[22px] bg-[#f4f4f5] px-5 py-3 text-[14px] leading-7 text-ink">
-          {message.content}
+          <div>{message.content}</div>
+          {message.attachments && message.attachments.length > 0 && (
+            <div className="mt-3 space-y-2">
+              {message.attachments.map((attachment) => (
+                <AttachmentCard key={`${message.id}-${attachment.name}`} attachment={attachment} />
+              ))}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -489,7 +776,7 @@ function FocusMessage({
                 <button
                   key={question}
                   disabled={loading}
-                  onClick={() => onAsk(question)}
+                  onClick={() => onDraft(question)}
                   className="w-fit max-w-full rounded-xl bg-[#f7f5ff] px-3 py-2.5 text-left text-[12.5px] font-semibold text-brand transition-colors hover:bg-[#eeeaff] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {question}
@@ -515,11 +802,13 @@ function FocusMessage({
 function ConversationListItem({
   conversation,
   active,
+  displayTitle,
   onSelect,
   onDelete,
 }: {
   conversation: ReturnType<typeof useAssistant>["conversations"][number];
   active: boolean;
+  displayTitle?: string;
   onSelect: () => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
@@ -533,7 +822,7 @@ function ConversationListItem({
 
   const handleDelete = async (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    if (!window.confirm(`确认删除会话「${conversation.title}」吗？`)) return;
+    if (!window.confirm(`确认删除会话「${displayTitle || conversation.title}」吗？`)) return;
     await onDelete();
   };
 
@@ -547,11 +836,11 @@ function ConversationListItem({
         "group flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors",
         active ? "bg-white text-brand shadow-[0_8px_18px_rgba(15,23,42,0.04)]" : "text-[#172452] hover:bg-white"
       )}
-      title={conversation.title}
+      title={displayTitle || conversation.title}
     >
       <Icon name="history" className="h-3.5 w-3.5 shrink-0" />
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-semibold">{conversation.title}</div>
+        <div className="truncate text-[13px] font-semibold">{displayTitle || conversation.title}</div>
         <div className="mt-0.5 text-[10.5px] font-medium text-slate-400">
           {conversation.message_count} 条消息
         </div>

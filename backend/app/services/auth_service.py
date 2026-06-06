@@ -22,9 +22,51 @@ from app.api.errors import AppError
 from app.core.config import Settings
 from app.db.base import APP_TIMEZONE, app_now
 from app.db.models.auth import AuthSession, AuthUser, SmsVerificationCode
+from app.db.models.tenant import Tenant
 
 
 PHONE_RE = re.compile(r"^\+?\d{6,20}$")
+
+# 平台级角色
+ROLE_SUPER_ADMIN = "super_admin"
+ROLE_MEMBER = "member"
+
+# 租户内身份
+USER_TYPE_ENTERPRISE_MANAGER = "enterprise_manager"
+USER_TYPE_ENTERPRISE_STAFF = "enterprise_staff"
+USER_TYPE_INDIVIDUAL = "individual"
+
+# 可操作人工审核台的身份（超管恒可）
+REVIEWER_USER_TYPES = {USER_TYPE_ENTERPRISE_MANAGER, USER_TYPE_INDIVIDUAL}
+
+# 超级管理员手机号（normalize 后为 +8615520810759）
+SUPER_ADMIN_PHONE = "+8615520810759"
+
+
+def can_review(user: AuthUser) -> bool:
+    return user.role == ROLE_SUPER_ADMIN or user.user_type in REVIEWER_USER_TYPES
+
+
+def user_public_view(db: Session, user: AuthUser) -> dict:
+    """构造前端可用的用户视图：含租户名与计算出的权限布尔。"""
+    tenant_name = None
+    if user.tenant_id:
+        tenant = db.get(Tenant, user.tenant_id)
+        tenant_name = tenant.name if tenant else None
+    is_super = user.role == ROLE_SUPER_ADMIN
+    return {
+        "id": user.id,
+        "phone": user.phone,
+        "display_name": user.display_name,
+        "role": user.role,
+        "user_type": user.user_type,
+        "tenant_id": user.tenant_id,
+        "tenant_name": tenant_name,
+        "is_super_admin": is_super,
+        "can_review": can_review(user),
+        "created_at": user.created_at,
+        "last_login_at": user.last_login_at,
+    }
 
 
 @dataclass(frozen=True)
@@ -219,9 +261,38 @@ class AuthService:
         record.consumed_at = now
         user = db.execute(select(AuthUser).where(AuthUser.phone == phone)).scalar_one_or_none()
         if not user:
-            user = AuthUser(phone=phone)
-            db.add(user)
-            db.flush()
+            if phone == SUPER_ADMIN_PHONE:
+                # 超级管理员：平台级，不属于任何业务租户
+                user = AuthUser(
+                    phone=phone,
+                    display_name="超级管理员",
+                    role=ROLE_SUPER_ADMIN,
+                    user_type=USER_TYPE_INDIVIDUAL,
+                    tenant_id=None,
+                )
+                db.add(user)
+                db.flush()
+            else:
+                # 普通用户：首次登录自助开一个“独立个人”租户（C 方案中的个人自助）
+                user = AuthUser(
+                    phone=phone,
+                    role=ROLE_MEMBER,
+                    user_type=USER_TYPE_INDIVIDUAL,
+                )
+                db.add(user)
+                db.flush()
+                tenant = Tenant(
+                    name=f"{phone} 的工作区",
+                    type="individual",
+                    owner_user_id=user.id,
+                )
+                db.add(tenant)
+                db.flush()
+                user.tenant_id = tenant.id
+        elif phone == SUPER_ADMIN_PHONE and user.role != ROLE_SUPER_ADMIN:
+            # 幂等纠正：确保超管手机号始终是 super_admin
+            user.role = ROLE_SUPER_ADMIN
+            user.tenant_id = None
         user.last_login_at = now
         token = secrets.token_urlsafe(32)
         expires_at = now + timedelta(days=self.settings.auth_session_ttl_days)

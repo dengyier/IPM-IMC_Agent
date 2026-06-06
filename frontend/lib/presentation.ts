@@ -16,7 +16,11 @@ export const sourceStatusTone: Record<string, { label: string; tone: string }> =
   processing: { label: "处理中", tone: "bg-orange-50 text-orange-500" },
   processed: { label: "已入库", tone: "bg-blue-50 text-blue-600" },
   kernel_built: { label: "已建底座", tone: "bg-emerald-50 text-emerald-600" },
-  absorbed: { label: "已吸收", tone: "bg-emerald-50 text-emerald-600" },
+  absorbed: { label: "待人工审核", tone: "bg-orange-50 text-orange-500" },
+  pending_review: { label: "待人工审核", tone: "bg-orange-50 text-orange-500" },
+  extraction_empty: { label: "抽取为空", tone: "bg-amber-50 text-amber-600" },
+  reviewed: { label: "已审核", tone: "bg-emerald-50 text-emerald-600" },
+  rejected: { label: "已驳回", tone: "bg-rose-50 text-rose-500" },
   failed: { label: "处理失败", tone: "bg-rose-50 text-rose-500" },
 };
 

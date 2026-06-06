@@ -65,6 +65,7 @@ class ExpansionAbsorptionService:
         records: list[ExpansionChunk] = []
         for pc in parsed:
             record = ExpansionChunk(
+                tenant_id=source.tenant_id,
                 source_id=source.id,
                 chunk_text=pc.text,
                 chunk_index=pc.chunk_index,
@@ -92,6 +93,7 @@ class ExpansionAbsorptionService:
                 {
                     "chunk_id": r.id,
                     "source_id": source.id,
+                    "tenant_id": source.tenant_id,
                     "source_type": source.source_type,
                     "section_title": r.section_title,
                     "page_number": r.page_number,
@@ -124,6 +126,7 @@ class ExpansionAbsorptionService:
                 ext_type = self._classify(section, source.source_type)
                 aligned_id, score = self._align(section, node_index)
                 item = ExpansionItem(
+                    tenant_id=source.tenant_id,
                     source_id=source.id,
                     chunk_id=chunk.id,
                     extension_type=ext_type,
@@ -142,6 +145,7 @@ class ExpansionAbsorptionService:
                 items.append(item)
 
                 task = ReviewTask(
+                    tenant_id=source.tenant_id,
                     item_id=item.id,
                     task_type="expansion_review",
                     status="pending",

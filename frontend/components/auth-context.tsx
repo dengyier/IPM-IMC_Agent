@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { usePathname, useRouter } from "next/navigation";
 
 import { AUTH_TOKEN_KEY, ApiError, authApi, type AuthUser } from "@/lib/api";
+import { canAccessPath } from "@/lib/authz";
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -68,16 +69,22 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { user, booting } = useAuth();
   const isLoginPage = pathname === "/login";
+  const allowed = isLoginPage || canAccessPath(user, pathname);
 
   useEffect(() => {
     if (booting) return;
     if (!user && !isLoginPage) {
       router.replace(`/login?redirect=${encodeURIComponent(pathname || "/")}`);
+      return;
     }
     if (user && isLoginPage) {
       router.replace("/");
+      return;
     }
-  }, [booting, isLoginPage, pathname, router, user]);
+    if (user && !allowed) {
+      router.replace("/");
+    }
+  }, [allowed, booting, isLoginPage, pathname, router, user]);
 
   if (booting) {
     return (
@@ -91,6 +98,14 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-transparent text-[14px] font-semibold text-slate-500">
         正在进入登录页...
+      </div>
+    );
+  }
+
+  if (user && !allowed) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-transparent text-[14px] font-semibold text-slate-500">
+        正在返回工作台...
       </div>
     );
   }

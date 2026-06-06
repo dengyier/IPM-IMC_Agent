@@ -5,12 +5,16 @@ import { Icon } from "./icon";
 import { cn } from "@/lib/utils";
 import { navItems } from "@/lib/data";
 import { dashboardApi, type DashboardSummary } from "@/lib/api";
+import { canAccessNavItem } from "@/lib/authz";
 import { fmtNum } from "@/lib/presentation";
+import { useAuth } from "./auth-context";
 import { UserAccountMenu } from "./user-account-menu";
 
 export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
+  const { user } = useAuth();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState(false);
+  const visibleNavItems = navItems.filter((item) => canAccessNavItem(user, item));
 
   useEffect(() => {
     let cancelled = false;
@@ -47,7 +51,7 @@ export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
 
       {/* Nav */}
       <nav className="mt-0 flex flex-col gap-1 px-3">
-        {navItems.map((item) => (
+        {visibleNavItems.map((item) => (
           <a
             key={item.label}
             href={item.href}
@@ -70,13 +74,15 @@ export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
         <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
           每一次学习都会沉淀为可复用的知识资产
         </p>
-        <a
-          href="/knowledge-graph"
-          className="mt-3 flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-indigo-100 bg-white/85 text-[12px] font-bold text-brand transition-colors hover:bg-[#f6f5ff]"
-        >
-          查看完整图谱
-          <Icon name="chevron-right" className="h-3.5 w-3.5" />
-        </a>
+        {user?.is_super_admin && (
+          <a
+            href="/knowledge-graph"
+            className="mt-3 flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-indigo-100 bg-white/85 text-[12px] font-bold text-brand transition-colors hover:bg-[#f6f5ff]"
+          >
+            查看完整图谱
+            <Icon name="chevron-right" className="h-3.5 w-3.5" />
+          </a>
+        )}
         <div className="mt-4 space-y-3">
           <AssetStat label="资料总数" value={error ? "—" : sourceTotal !== null ? fmtNum(sourceTotal) : "··"} unit="份" />
           <AssetStat label="知识节点总数" value={error ? "—" : summary ? fmtNum(summary.nodes) : "··"} unit="个" />

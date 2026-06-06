@@ -73,24 +73,40 @@ class AssistantService:
         self.core_store = core_store
         self.llm = llm
 
-    def ask(self, question: str, company_context: str | None = None) -> AssistantAskResponse:
+    def ask(
+        self,
+        question: str,
+        company_context: str | None = None,
+        conversation_history: list[dict[str, str]] | None = None,
+        tenant_id: str | None = None,
+    ) -> AssistantAskResponse:
         full_question = question.strip()
+        history_text = self._history_to_text(conversation_history or [])
 
         # 分流：纯问候/闲聊/与经营无关的输入，走轻量对话回复，
         # 不路由方法论、不返回节点引用、不套结构化框架（避免对「你好」也生成业务诊断）。
-        if not company_context and self._triage(full_question) == "casual":
+        if not company_context and not history_text and self._triage(full_question) == "casual":
             return self._casual_response(full_question)
 
         if company_context:
             full_question = f"{full_question}\n\n企业补充背景：{company_context.strip()}"
+        if history_text:
+            full_question = f"前序对话上下文：\n{history_text}\n\n当前追问：{full_question}"
 
         routing = ProblemRoutingService(self.db).route(full_question)
         context = ContextFusionService(self.db, self.embeddings, self.core_store).fuse(
             full_question,
             routing,
+            tenant_id=tenant_id,
         )
 
-        llm_answer = self._llm_answer(question, company_context, routing.intent, context)
+        llm_answer = self._llm_answer(
+            question,
+            company_context,
+            history_text,
+            routing.intent,
+            context,
+        )
         answer = self._plain_text_answer(
             llm_answer or self._fallback_answer(question, routing.intent, context)
         )
@@ -174,6 +190,7 @@ class AssistantService:
         self,
         question: str,
         company_context: str | None,
+        history_text: str,
         intent: str,
         context: FusedContext,
     ) -> str | None:
@@ -198,6 +215,8 @@ class AssistantService:
             for e in (context.approved_expansions + context.cases)[:6]
         ]
         user_prompt = (
+            f"前序对话上下文（如果为空，说明这是新问题；如果不为空，必须结合上下文理解指代、合同/项目/企业背景和上一轮判断）：\n"
+            f"{history_text or '（无）'}\n\n"
             f"用户的问题：{question}\n"
             f"企业背景：{company_context or '（用户暂未提供，必要时可引导其补充关键信息）'}\n"
             f"系统识别意图（仅供参考，不必照搬）：{intent}\n"
@@ -209,6 +228,22 @@ class AssistantService:
             "最终输出只能是普通中文正文，不要输出 Markdown，不要出现 ###、**、项目符号或表格。"
         )
         return self.llm.chat_text(ASSISTANT_SYSTEM, user_prompt, temperature=0.45)
+
+    @staticmethod
+    def _history_to_text(history: list[dict[str, str]], max_chars: int = 6000) -> str:
+        """把最近会话历史压成短上下文，帮助模型理解追问里的「这个/它/合同」等指代。"""
+        lines: list[str] = []
+        for item in history:
+            role = item.get("role", "")
+            content = " ".join((item.get("content") or "").split())
+            if not content:
+                continue
+            label = "用户" if role == "user" else "助手"
+            lines.append(f"{label}：{content[:900]}")
+        text = "\n".join(lines).strip()
+        if len(text) <= max_chars:
+            return text
+        return text[-max_chars:]
 
     def _fallback_answer(self, question: str, intent: str, context: FusedContext) -> str:
         nodes = context.nodes[:4]
