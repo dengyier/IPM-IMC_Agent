@@ -259,6 +259,49 @@ export const authApi = {
   logout: () => api.post<void>("/api/auth/logout"),
 };
 
+// ---- 用户反馈 ----
+
+export type FeedbackCategory = "suggestion" | "problem" | "other";
+
+export interface Feedback {
+  id: string;
+  category: FeedbackCategory;
+  content: string;
+  contact: string | null;
+  page_url: string | null;
+  user_agent: string | null;
+  status: "open" | "resolved";
+  admin_reply: string | null;
+  user_name: string | null;
+  user_phone: string | null;
+  tenant_id: string | null;
+  handled_by: string | null;
+  handled_at: string | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export const feedbackApi = {
+  create: (payload: {
+    category: FeedbackCategory;
+    content: string;
+    contact?: string;
+    page_url?: string;
+    user_agent?: string;
+  }) =>
+    api.post<Feedback>("/api/feedback", payload),
+  list: (params?: { status?: "open" | "resolved"; category?: FeedbackCategory; keyword?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set("status", params.status);
+    if (params?.category) qs.set("category", params.category);
+    if (params?.keyword?.trim()) qs.set("keyword", params.keyword.trim());
+    const query = qs.toString();
+    return api.get<Feedback[]>(`/api/feedback${query ? `?${query}` : ""}`);
+  },
+  updateStatus: (id: string, status: "open" | "resolved", adminReply?: string) =>
+    api.patch<Feedback>(`/api/feedback/${id}`, { status, admin_reply: adminReply }),
+};
+
 // ---- 智能助手 ----
 
 export interface AssistantNodeRef {

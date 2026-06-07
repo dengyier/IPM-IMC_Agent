@@ -17,6 +17,7 @@ from app.api.routers import (
     dashboard,
     diagnosis,
     expansion,
+    feedback,
     methodology,
     system,
     tasks,
@@ -54,6 +55,7 @@ def create_app() -> FastAPI:
     app.include_router(expansion.router)
     app.include_router(expansion.review_router)
     app.include_router(diagnosis.router)
+    app.include_router(feedback.router)
 
     @app.get("/")
     def root() -> dict:

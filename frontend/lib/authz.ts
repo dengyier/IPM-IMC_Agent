@@ -22,7 +22,8 @@ export function canAccessPath(user: AuthUser | null, pathname: string | null): b
   if (
     path.startsWith("/knowledge-nodes") ||
     path.startsWith("/knowledge-graph") ||
-    path.startsWith("/data-center")
+    path.startsWith("/data-center") ||
+    path.startsWith("/feedback")
   ) {
     return user.is_super_admin;
   }
