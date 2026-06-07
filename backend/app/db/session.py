@@ -82,6 +82,23 @@ _COLUMN_ADDITIONS: dict[str, dict[str, str]] = {
     "review_tasks": {"tenant_id": _TENANT_COL},
     "tasks": {"tenant_id": _TENANT_COL},
     "agent_runs": {"tenant_id": _TENANT_COL},
+    "feedbacks": {
+        "tenant_id": _TENANT_COL,
+        "user_id": "VARCHAR(36)",
+        "user_name": "VARCHAR(80)",
+        "user_phone": "VARCHAR(40)",
+        "category": "VARCHAR(40) DEFAULT 'suggestion'",
+        "content": "TEXT",
+        "contact": "VARCHAR(120)",
+        "page_url": "VARCHAR(500)",
+        "user_agent": "VARCHAR(500)",
+        "status": "VARCHAR(20) DEFAULT 'open'",
+        "admin_reply": "TEXT",
+        "handled_by": "VARCHAR(36)",
+        "handled_at": "DATETIME",
+        "created_at": "DATETIME",
+        "updated_at": "DATETIME",
+    },
 }
 
 

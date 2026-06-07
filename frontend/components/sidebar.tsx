@@ -9,11 +9,13 @@ import { canAccessNavItem } from "@/lib/authz";
 import { fmtNum } from "@/lib/presentation";
 import { useAuth } from "./auth-context";
 import { UserAccountMenu } from "./user-account-menu";
+import { FeedbackDialog } from "./feedback-dialog";
 
 export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
   const { user } = useAuth();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const visibleNavItems = navItems.filter((item) => canAccessNavItem(user, item));
 
   useEffect(() => {
@@ -103,6 +105,14 @@ export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
 
       {/* User */}
       <div className="mt-auto border-t border-line">
+        <button
+          type="button"
+          onClick={() => setFeedbackOpen(true)}
+          className="mx-3 mt-3 flex h-10 w-[calc(100%-24px)] items-center gap-2.5 rounded-xl px-3.5 text-[13px] font-semibold text-[#1c2a54] transition-colors hover:bg-[#f0edff] hover:text-brand"
+        >
+          <Icon name="help-circle" className="h-4 w-4" />
+          意见反馈
+        </button>
         <UserAccountMenu
           placement="top-start"
           className="w-full rounded-none px-4 py-4 hover:bg-slate-50"
@@ -110,6 +120,7 @@ export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
           chevronClassName="ml-auto"
         />
       </div>
+      <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
     </aside>
   );
 }

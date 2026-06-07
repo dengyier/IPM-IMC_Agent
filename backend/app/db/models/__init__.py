@@ -9,6 +9,7 @@ from app.db.models.assistant import (
     AssistantMessage,
 )
 from app.db.models.diagnosis import DiagnosisReport, ReportQualityCheck
+from app.db.models.feedback import Feedback
 from app.db.models.expansion import (
     ExpansionChunk,
     ExpansionItem,
@@ -50,4 +51,5 @@ __all__ = [
     "ReviewTask",
     "DiagnosisReport",
     "ReportQualityCheck",
+    "Feedback",
 ]

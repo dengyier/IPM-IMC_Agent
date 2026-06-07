@@ -154,6 +154,13 @@ export const navItems: GuardedNavItem[] = [
   { key: "notes", icon: "git-branch", label: "知识扩展", href: "/note-evolution" },
   { key: "review", icon: "users", label: "人工审核台", href: "/review", requiresReview: true },
   { key: "reports", icon: "file-bar-chart", label: "诊断报告中心", href: "/reports" },
+  {
+    key: "feedback",
+    icon: "help-circle",
+    label: "反馈管理",
+    href: "/feedback",
+    requiresSuperAdmin: true,
+  },
   { key: "settings", icon: "settings", label: "系统设置", href: "/settings" },
 ];
 
