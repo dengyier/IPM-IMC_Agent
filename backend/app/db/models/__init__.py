@@ -2,7 +2,12 @@
 
 from app.db.models.common import AgentRun, Task
 from app.db.models.auth import AuthSession, AuthUser, SmsVerificationCode
-from app.db.models.assistant import AssistantConversation, AssistantMessage
+from app.db.models.assistant import (
+    AssistantConversation,
+    AssistantFile,
+    AssistantFileChunk,
+    AssistantMessage,
+)
 from app.db.models.diagnosis import DiagnosisReport, ReportQualityCheck
 from app.db.models.expansion import (
     ExpansionChunk,
@@ -30,6 +35,8 @@ __all__ = [
     "SmsVerificationCode",
     "AssistantConversation",
     "AssistantMessage",
+    "AssistantFile",
+    "AssistantFileChunk",
     "SystemSettings",
     "MethodologyChunk",
     "MethodologyEdge",

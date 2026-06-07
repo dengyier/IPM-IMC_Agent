@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://127.0.0.1:6333"
     methodology_core_collection: str = "methodology_core_chunks"
     expansion_collection: str = "expansion_chunks"
+    assistant_file_collection: str = "assistant_file_chunks"
 
     # DeepSeek（OpenAI 兼容）
     deepseek_api_key: str | None = None
@@ -45,7 +46,7 @@ class Settings(BaseSettings):
     storage_dir: Path = Path("./data/uploads")
 
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+        env_file=(".env", "backend/.env"), env_file_encoding="utf-8", extra="ignore"
     )
 
 

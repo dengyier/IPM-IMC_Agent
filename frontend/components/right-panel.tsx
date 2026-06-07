@@ -28,6 +28,14 @@ function titleFromActiveMessages(messages: ReturnType<typeof useAssistant>["mess
   return firstUserMessage ? titleFromQuestion(firstUserMessage.content) : null;
 }
 
+type PendingAttachment = {
+  fileId: string;
+  name: string;
+  chars: number;
+  chunkCount: number;
+  status: string;
+};
+
 export function HomeWorkspace() {
   const [convOpen, setConvOpen] = useState(true);
   return (
@@ -54,15 +62,19 @@ function ChatMain({
     historyLoading,
     setInput,
     sendQuestion,
+    depositAttachment,
+    depositMessage,
   } = useAssistant();
   const { user } = useAuth();
   const endRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [focusOpen, setFocusOpen] = useState(false);
-  const [attachment, setAttachment] = useState<{ name: string; text: string; truncated: boolean; chars: number } | null>(null);
+  const [attachment, setAttachment] = useState<PendingAttachment | null>(null);
   const [attaching, setAttaching] = useState(false);
   const [attachError, setAttachError] = useState<string | null>(null);
+  const [depositingFileId, setDepositingFileId] = useState<string | null>(null);
+  const [depositingMessageId, setDepositingMessageId] = useState<string | null>(null);
   const canSend = input.trim().length > 0 && !loading && !attaching;
   const hasConversation = messages.some((message) => message.role === "user");
   const activeConversation = useMemo(
@@ -83,12 +95,18 @@ function ChatMain({
     setAttaching(true);
     setAttachError(null);
     try {
-      const res = await assistantApi.parseFile(file);
-      if (!res.text.trim()) {
-        setAttachError("未能从该文件解析出文本内容。");
+      const res = await assistantApi.parseFile(file, activeConversationId);
+      if (!res.file_id || res.chunk_count <= 0) {
+        setAttachError("未能从该文件解析出可追问内容。");
         return;
       }
-      setAttachment({ name: res.filename || file.name, text: res.text, truncated: res.truncated, chars: res.chars });
+      setAttachment({
+        fileId: res.file_id,
+        name: res.filename || file.name,
+        chars: res.chars,
+        chunkCount: res.chunk_count,
+        status: res.status,
+      });
     } catch (e) {
       setAttachError(e instanceof ApiError ? `解析失败：${e.message}` : "文件解析失败");
     } finally {
@@ -98,19 +116,47 @@ function ChatMain({
 
   async function submit(question?: string) {
     if (loading || attaching) return;
-    const companyContext = attachment
-      ? `用户上传的文件《${attachment.name}》解析内容：\n${attachment.text}`
-      : undefined;
     const messageAttachments: AssistantAttachment[] | undefined = attachment
-      ? [{ name: attachment.name, chars: attachment.chars, truncated: attachment.truncated }]
+      ? [{
+          name: attachment.name,
+          chars: attachment.chars,
+          file_id: attachment.fileId,
+          chunk_count: attachment.chunkCount,
+          status: attachment.status,
+          truncated: false,
+        }]
       : undefined;
-    await sendQuestion(question, companyContext, messageAttachments);
+    await sendQuestion(question, undefined, messageAttachments);
     setAttachment(null);
   }
 
   function fillDraft(question: string) {
     setInput(question);
     requestAnimationFrame(() => composerRef.current?.focus());
+  }
+
+  async function handleDeposit(fileId: string) {
+    setDepositingFileId(fileId);
+    setAttachError(null);
+    try {
+      await depositAttachment(fileId);
+    } catch (error) {
+      setAttachError(error instanceof ApiError ? `沉淀失败：${error.message}` : "沉淀失败，请稍后再试");
+    } finally {
+      setDepositingFileId(null);
+    }
+  }
+
+  async function handleDepositMessage(messageId: string) {
+    setDepositingMessageId(messageId);
+    setAttachError(null);
+    try {
+      await depositMessage(messageId);
+    } catch (error) {
+      setAttachError(error instanceof ApiError ? `沉淀失败：${error.message}` : "沉淀失败，请稍后再试");
+    } finally {
+      setDepositingMessageId(null);
+    }
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -176,6 +222,10 @@ function ChatMain({
                   message={message}
                   loading={loading}
                   onDraft={fillDraft}
+                  onDeposit={handleDeposit}
+                  depositingFileId={depositingFileId}
+                  onDepositMessage={handleDepositMessage}
+                  depositingMessageId={depositingMessageId}
                 />
               ))}
               {loading && (
@@ -214,7 +264,9 @@ function ChatMain({
                   <span className="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-1.5 text-[12px] font-semibold text-[#172452]">
                     <Icon name="file-text" className="h-3.5 w-3.5 text-brand" />
                     <span className="max-w-[260px] truncate">{attachment.name}</span>
-                    {attachment.truncated && <span className="text-[11px] text-amber-600">已截断</span>}
+                    <span className="text-[11px] text-emerald-600">
+                      已解析全文 · {attachment.chunkCount} 片段
+                    </span>
                     <button
                       type="button"
                       onClick={() => setAttachment(null)}
@@ -314,14 +366,29 @@ function HomeHero({
 function AttachmentCard({
   attachment,
   tone = "default",
+  onDeposit,
+  depositing = false,
 }: {
   attachment: AssistantAttachment;
   tone?: "default" | "sent";
+  onDeposit?: (fileId: string) => void;
+  depositing?: boolean;
 }) {
+  const isDeposited = Boolean(attachment.deposited_source_id || attachment.status === "deposited");
+  const pendingReview = attachment.review_task_count ?? 0;
+  const reviewed = isDeposited && pendingReview === 0;
   const sizeText =
-    typeof attachment.chars === "number" && attachment.chars > 0
-      ? `${attachment.chars.toLocaleString()} 字`
-      : "已随问题发送";
+    isDeposited
+      ? reviewed
+        ? "已沉淀 · 已审核"
+        : `已沉淀 · 待审核 ${pendingReview} 条`
+      : typeof attachment.chunk_count === "number" && attachment.chunk_count > 0
+        ? `已解析全文 · ${attachment.chunk_count} 个片段可追问`
+        : typeof attachment.chars === "number" && attachment.chars > 0
+          ? `${attachment.chars.toLocaleString()} 字 · 可追问`
+          : "已随问题发送";
+  const fileId = attachment.file_id || "";
+  const canDeposit = Boolean(fileId && onDeposit && !isDeposited);
   return (
     <div
       className={cn(
@@ -343,9 +410,51 @@ function AttachmentCard({
         <span className="block truncate text-[12.5px] font-bold">{attachment.name}</span>
         <span className={cn("block text-[11px]", tone === "sent" ? "text-white/75" : "text-slate-400")}>
           {sizeText}
-          {attachment.truncated ? " · 内容较长，已截取前段用于分析" : ""}
         </span>
       </span>
+      {canDeposit && (
+        <button
+          type="button"
+          disabled={depositing}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onDeposit?.(fileId);
+          }}
+          className={cn(
+            "shrink-0 rounded-lg px-2 py-1 text-[11px] font-bold transition disabled:cursor-not-allowed disabled:opacity-60",
+            tone === "sent"
+              ? "bg-white/20 text-white hover:bg-white/25"
+              : "bg-[#f0edff] text-brand hover:bg-[#e8e4ff]"
+          )}
+        >
+          {depositing ? "沉淀中" : "沉淀为资料"}
+        </button>
+      )}
+      {isDeposited && !reviewed && (
+        <a
+          href="/review"
+          onClick={(event) => event.stopPropagation()}
+          className={cn(
+            "shrink-0 rounded-lg px-2 py-1 text-[11px] font-bold transition",
+            tone === "sent"
+              ? "bg-white/20 text-white hover:bg-white/25"
+              : "bg-amber-50 text-amber-600 hover:bg-amber-100"
+          )}
+        >
+          去审核
+        </a>
+      )}
+      {reviewed && (
+        <span
+          className={cn(
+            "shrink-0 rounded-lg px-2 py-1 text-[11px] font-bold",
+            tone === "sent" ? "bg-white/20 text-white" : "bg-emerald-50 text-emerald-600"
+          )}
+        >
+          已审核
+        </span>
+      )}
     </div>
   );
 }
@@ -354,11 +463,21 @@ function MessageBubble({
   message,
   loading,
   onDraft,
+  onDeposit,
+  depositingFileId,
+  onDepositMessage,
+  depositingMessageId,
 }: {
   message: ReturnType<typeof useAssistant>["messages"][number];
   loading: boolean;
   onDraft: (question: string) => void;
+  onDeposit: (fileId: string) => void;
+  depositingFileId: string | null;
+  onDepositMessage: (messageId: string) => void;
+  depositingMessageId: string | null;
 }) {
+  const messageDeposited = Boolean(message.depositedSourceId);
+  const canDepositMessage = message.role === "assistant" && message.id !== "welcome";
   return (
     <div className="w-full">
       <div
@@ -377,6 +496,8 @@ function MessageBubble({
                 key={`${message.id}-${attachment.name}`}
                 attachment={attachment}
                 tone={message.role === "user" ? "sent" : "default"}
+                onDeposit={onDeposit}
+                depositing={Boolean(attachment.file_id && attachment.file_id === depositingFileId)}
               />
             ))}
           </div>
@@ -431,6 +552,36 @@ function MessageBubble({
             {message.action.label}
             <Icon name="chevron-right" className="h-3.5 w-3.5" />
           </a>
+        )}
+        {canDepositMessage && (
+          <div className="mt-3 border-t border-line/70 pt-2">
+            {messageDeposited ? (
+              message.reviewTaskCount && message.reviewTaskCount > 0 ? (
+                <a
+                  href="/review"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[12px] font-bold text-amber-600 hover:bg-amber-100"
+                >
+                  <Icon name="clipboard-check" className="h-3.5 w-3.5" />
+                  已沉淀 · 去审核 {message.reviewTaskCount} 条
+                </a>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[12px] font-bold text-emerald-600">
+                  <Icon name="check-circle" className="h-3.5 w-3.5" />
+                  已沉淀 · 已审核
+                </span>
+              )
+            ) : (
+              <button
+                type="button"
+                disabled={loading || depositingMessageId === message.id}
+                onClick={() => onDepositMessage(message.id)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[#f0edff] px-2.5 py-1.5 text-[12px] font-bold text-brand transition hover:bg-[#e8e4ff] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Icon name={depositingMessageId === message.id ? "refresh" : "archive"} className={cn("h-3.5 w-3.5", depositingMessageId === message.id && "animate-spin")} />
+                {depositingMessageId === message.id ? "沉淀中" : "沉淀为经验"}
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -507,10 +658,14 @@ function AssistantFocusMode({ onClose }: { onClose: () => void }) {
     createConversation,
     selectConversation,
     deleteConversation,
+    depositAttachment,
+    depositMessage,
   } = useAssistant();
   const endRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [searchKeyword, setSearchKeyword] = useState("");
+  const [depositingFileId, setDepositingFileId] = useState<string | null>(null);
+  const [depositingMessageId, setDepositingMessageId] = useState<string | null>(null);
   const { user } = useAuth();
   const canSend = input.trim().length > 0 && !loading;
   const filteredConversations = useMemo(() => {
@@ -535,6 +690,24 @@ function AssistantFocusMode({ onClose }: { onClose: () => void }) {
   function fillDraft(question: string) {
     setInput(question);
     requestAnimationFrame(() => composerRef.current?.focus());
+  }
+
+  async function handleDeposit(fileId: string) {
+    setDepositingFileId(fileId);
+    try {
+      await depositAttachment(fileId);
+    } finally {
+      setDepositingFileId(null);
+    }
+  }
+
+  async function handleDepositMessage(messageId: string) {
+    setDepositingMessageId(messageId);
+    try {
+      await depositMessage(messageId);
+    } finally {
+      setDepositingMessageId(null);
+    }
   }
 
   return (
@@ -655,7 +828,16 @@ function AssistantFocusMode({ onClose }: { onClose: () => void }) {
             {hasConversation && (
               <div className="mx-auto max-w-[900px] space-y-7">
                 {messages.map((message) => (
-                  <FocusMessage key={message.id} message={message} loading={loading} onDraft={fillDraft} />
+                  <FocusMessage
+                    key={message.id}
+                    message={message}
+                    loading={loading}
+                    onDraft={fillDraft}
+                    onDeposit={handleDeposit}
+                    depositingFileId={depositingFileId}
+                    onDepositMessage={handleDepositMessage}
+                    depositingMessageId={depositingMessageId}
+                  />
                 ))}
                 {loading && (
                   <div className="flex gap-4">
@@ -719,10 +901,18 @@ function FocusMessage({
   message,
   loading,
   onDraft,
+  onDeposit,
+  depositingFileId,
+  onDepositMessage,
+  depositingMessageId,
 }: {
   message: ReturnType<typeof useAssistant>["messages"][number];
   loading: boolean;
   onDraft: (question: string) => void;
+  onDeposit: (fileId: string) => void;
+  depositingFileId: string | null;
+  onDepositMessage: (messageId: string) => void;
+  depositingMessageId: string | null;
 }) {
   if (message.role === "user") {
     return (
@@ -732,7 +922,12 @@ function FocusMessage({
           {message.attachments && message.attachments.length > 0 && (
             <div className="mt-3 space-y-2">
               {message.attachments.map((attachment) => (
-                <AttachmentCard key={`${message.id}-${attachment.name}`} attachment={attachment} />
+                <AttachmentCard
+                  key={`${message.id}-${attachment.name}`}
+                  attachment={attachment}
+                  onDeposit={onDeposit}
+                  depositing={Boolean(attachment.file_id && attachment.file_id === depositingFileId)}
+                />
               ))}
             </div>
           )}
@@ -793,6 +988,36 @@ function FocusMessage({
             {message.action.label}
             <Icon name="chevron-right" className="h-3.5 w-3.5" />
           </a>
+        )}
+        {message.id !== "welcome" && (
+          <div className="mt-4 border-t border-line pt-3">
+            {message.depositedSourceId ? (
+              message.reviewTaskCount && message.reviewTaskCount > 0 ? (
+                <a
+                  href="/review"
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-amber-50 px-3 py-2 text-[13px] font-bold text-amber-600 hover:bg-amber-100"
+                >
+                  <Icon name="clipboard-check" className="h-3.5 w-3.5" />
+                  已沉淀 · 去审核 {message.reviewTaskCount} 条
+                </a>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 px-3 py-2 text-[13px] font-bold text-emerald-600">
+                  <Icon name="check-circle" className="h-3.5 w-3.5" />
+                  已沉淀 · 已审核
+                </span>
+              )
+            ) : (
+              <button
+                type="button"
+                disabled={loading || depositingMessageId === message.id}
+                onClick={() => onDepositMessage(message.id)}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-[#f0edff] px-3 py-2 text-[13px] font-bold text-brand transition hover:bg-[#e8e4ff] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Icon name={depositingMessageId === message.id ? "refresh" : "archive"} className={cn("h-3.5 w-3.5", depositingMessageId === message.id && "animate-spin")} />
+                {depositingMessageId === message.id ? "沉淀中" : "沉淀为经验"}
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

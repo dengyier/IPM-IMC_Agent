@@ -70,6 +70,13 @@ def _ensure_sqlite_schema() -> None:
         "assistant_messages": {
             "tenant_id": tenant_col,
             "attachments": "JSON DEFAULT '[]'",
+            "deposited_source_id": "VARCHAR(36)",
+            "deposited_at": "DATETIME",
+        },
+        "assistant_files": {
+            "tenant_id": tenant_col,
+            "deposited_source_id": "VARCHAR(36)",
+            "deposited_at": "DATETIME",
         },
         "expansion_sources": {"tenant_id": tenant_col},
         "expansion_chunks": {"tenant_id": tenant_col},

@@ -44,6 +44,16 @@ def get_expansion_store() -> VectorStore:
 
 
 @lru_cache
+def get_assistant_file_store() -> VectorStore:
+    settings = get_settings()
+    return VectorStore(
+        url=settings.qdrant_url,
+        collection=settings.assistant_file_collection,
+        vector_size=settings.embedding_dim,
+    )
+
+
+@lru_cache
 def get_llm() -> LLMService:
     return LLMService(get_settings())
 

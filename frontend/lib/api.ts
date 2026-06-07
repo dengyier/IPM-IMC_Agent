@@ -271,11 +271,18 @@ export interface AssistantNodeRef {
 export interface AssistantAttachment {
   name: string;
   chars?: number | null;
+  file_id?: string | null;
+  chunk_count?: number | null;
+  status?: string | null;
+  deposited_source_id?: string | null;
+  item_count?: number | null;
+  review_task_count?: number | null;
   truncated?: boolean;
 }
 
 export interface AssistantAskResponse {
   conversation_id: string;
+  assistant_message_id: string | null;
   answer: string;
   intent: string;
   used_llm: boolean;
@@ -295,6 +302,9 @@ export interface AssistantMessageRecord {
   used_llm: boolean;
   action_label: string | null;
   action_href: string | null;
+  deposited_source_id?: string | null;
+  item_count?: number | null;
+  review_task_count?: number | null;
   created_at: string;
 }
 
@@ -307,24 +317,59 @@ export interface AssistantConversationRecord {
 }
 
 export interface AssistantParseFileResult {
+  file_id: string;
+  conversation_id: string;
   filename: string;
   chars: number;
+  chunk_count: number;
+  status: string;
   truncated: boolean;
   text: string;
+}
+
+export interface AssistantDepositFileResult {
+  file_id: string;
+  source_id: string;
+  title: string;
+  status: string;
+  chunk_count: number;
+  embedded_count: number;
+  item_count: number;
+  review_task_count: number;
+  vector_backend: string | null;
+  message: string;
+}
+
+export interface AssistantDepositMessageResult {
+  message_id: string;
+  source_id: string;
+  title: string;
+  status: string;
+  chunk_count: number;
+  embedded_count: number;
+  item_count: number;
+  review_task_count: number;
+  vector_backend: string | null;
+  message: string;
 }
 
 export const assistantApi = {
   conversations: () =>
     api.get<AssistantConversationRecord[]>("/api/assistant/conversations"),
-  parseFile: (file: File) => {
+  parseFile: (file: File, conversationId?: string | null) => {
     const form = new FormData();
     form.append("file", file);
+    if (conversationId) form.append("conversation_id", conversationId);
     return uploadRequest<AssistantParseFileResult>("/api/assistant/parse-file", form);
   },
   createConversation: (title?: string) =>
     api.post<AssistantConversationRecord>("/api/assistant/conversations", { title }),
   deleteConversation: (id: string) =>
     api.del<void>(`/api/assistant/conversations/${id}`),
+  depositFile: (fileId: string, payload?: { title?: string; source_type?: string; visibility?: string }) =>
+    api.post<AssistantDepositFileResult>(`/api/assistant/files/${fileId}/deposit`, payload || {}),
+  depositMessage: (messageId: string, payload?: { title?: string; source_type?: string; visibility?: string }) =>
+    api.post<AssistantDepositMessageResult>(`/api/assistant/messages/${messageId}/deposit`, payload || {}),
   messages: (conversationId?: string) =>
     api.get<AssistantMessageRecord[]>(
       `/api/assistant/messages${conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : ""}`
