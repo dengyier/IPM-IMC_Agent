@@ -5,6 +5,8 @@ import {
   assistantApi,
   type AssistantAttachment,
   type AssistantConversationRecord,
+  type AssistantDepositFileResult,
+  type AssistantDepositMessageResult,
   type AssistantMessageRecord,
   type AssistantNodeRef,
 } from "@/lib/api";
@@ -17,6 +19,9 @@ export type AssistantMessage = {
   nodeRefs?: AssistantNodeRef[];
   suggestedQuestions?: string[];
   usedLlm?: boolean;
+  depositedSourceId?: string | null;
+  itemCount?: number | null;
+  reviewTaskCount?: number | null;
   action?: {
     label: string;
     href: string;
@@ -35,6 +40,8 @@ type AssistantContextValue = {
   createConversation: () => Promise<void>;
   selectConversation: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
+  depositAttachment: (fileId: string) => Promise<AssistantDepositFileResult>;
+  depositMessage: (messageId: string) => Promise<AssistantDepositMessageResult>;
 };
 
 const AssistantContext = createContext<AssistantContextValue | null>(null);
@@ -62,6 +69,9 @@ function mapRecordToMessage(record: AssistantMessageRecord): AssistantMessage {
     content: record.content,
     attachments: record.attachments || [],
     usedLlm: record.used_llm,
+    depositedSourceId: record.deposited_source_id,
+    itemCount: record.item_count,
+    reviewTaskCount: record.review_task_count,
     nodeRefs: record.node_refs,
     suggestedQuestions: record.suggested_questions,
     action:
@@ -163,7 +173,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         setMessages((prev) => [
           ...prev,
           {
-            id: `a-${Date.now()}`,
+            id: result.assistant_message_id || `a-${Date.now()}`,
             role: "assistant",
             content: result.answer,
             usedLlm: result.used_llm,
@@ -230,6 +240,30 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     [loadMessages, refreshConversations]
   );
 
+  const depositAttachment = useCallback(
+    async (fileId: string) => {
+      const result = await assistantApi.depositFile(fileId);
+      if (activeConversationId) {
+        await loadMessages(activeConversationId);
+      }
+      refreshConversations().catch(() => undefined);
+      return result;
+    },
+    [activeConversationId, loadMessages, refreshConversations]
+  );
+
+  const depositMessage = useCallback(
+    async (messageId: string) => {
+      const result = await assistantApi.depositMessage(messageId);
+      if (activeConversationId) {
+        await loadMessages(activeConversationId);
+      }
+      refreshConversations().catch(() => undefined);
+      return result;
+    },
+    [activeConversationId, loadMessages, refreshConversations]
+  );
+
   const value = useMemo(
     () => ({
       input,
@@ -243,6 +277,8 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       createConversation,
       selectConversation,
       deleteConversation,
+      depositAttachment,
+      depositMessage,
     }),
     [
       input,
@@ -255,6 +291,8 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       createConversation,
       selectConversation,
       deleteConversation,
+      depositAttachment,
+      depositMessage,
     ]
   );
 

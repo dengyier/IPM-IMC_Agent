@@ -77,6 +77,7 @@ class AssistantService:
         self,
         question: str,
         company_context: str | None = None,
+        file_context: str | None = None,
         conversation_history: list[dict[str, str]] | None = None,
         tenant_id: str | None = None,
     ) -> AssistantAskResponse:
@@ -85,11 +86,13 @@ class AssistantService:
 
         # 分流：纯问候/闲聊/与经营无关的输入，走轻量对话回复，
         # 不路由方法论、不返回节点引用、不套结构化框架（避免对「你好」也生成业务诊断）。
-        if not company_context and not history_text and self._triage(full_question) == "casual":
+        if not company_context and not file_context and not history_text and self._triage(full_question) == "casual":
             return self._casual_response(full_question)
 
         if company_context:
             full_question = f"{full_question}\n\n企业补充背景：{company_context.strip()}"
+        if file_context:
+            full_question = f"{full_question}\n\n当前会话上传文件的相关片段：\n{file_context.strip()}"
         if history_text:
             full_question = f"前序对话上下文：\n{history_text}\n\n当前追问：{full_question}"
 
@@ -103,6 +106,7 @@ class AssistantService:
         llm_answer = self._llm_answer(
             question,
             company_context,
+            file_context,
             history_text,
             routing.intent,
             context,
@@ -190,6 +194,7 @@ class AssistantService:
         self,
         question: str,
         company_context: str | None,
+        file_context: str | None,
         history_text: str,
         intent: str,
         context: FusedContext,
@@ -219,6 +224,8 @@ class AssistantService:
             f"{history_text or '（无）'}\n\n"
             f"用户的问题：{question}\n"
             f"企业背景：{company_context or '（用户暂未提供，必要时可引导其补充关键信息）'}\n"
+            f"当前会话上传文件的相关片段（若用户问合同、文件、附件或方案，必须优先结合这些片段；若为空，不要编造文件内容）：\n"
+            f"{file_context or '（无）'}\n"
             f"系统识别意图（仅供参考，不必照搬）：{intent}\n"
             f"可自然融入的方法论判断要点（不要罗列、不要堆术语）：{method_points}\n"
             f"可选用的相关案例/补充材料：{approved_context}\n\n"
