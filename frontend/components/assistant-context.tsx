@@ -114,8 +114,14 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       setHistoryLoading(true);
       try {
-        const rows = await assistantApi.conversations();
+        let rows = await assistantApi.conversations();
         if (cancelled) return;
+        // 首次进入：若没有任何会话，默认建一个，保证右侧列表始终有一条对话。
+        if (rows.length === 0) {
+          await assistantApi.createConversation("新会话").catch(() => undefined);
+          rows = await assistantApi.conversations();
+          if (cancelled) return;
+        }
         setConversations(rows);
         const savedId =
           typeof window !== "undefined"
@@ -123,6 +129,9 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
             : null;
         const nextId = savedId && rows.some((row) => row.id === savedId) ? savedId : rows[0]?.id ?? "default";
         setActiveConversationId(nextId);
+        if (nextId && typeof window !== "undefined") {
+          window.localStorage.setItem("imc_ipm_active_assistant_conversation", nextId);
+        }
         const records = await assistantApi.messages(nextId);
         if (!cancelled) {
           setMessages(records.length > 0 ? records.map(mapRecordToMessage) : [WELCOME_MESSAGE]);
