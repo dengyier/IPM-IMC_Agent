@@ -22,6 +22,7 @@ export type AssistantMessage = {
   depositedSourceId?: string | null;
   itemCount?: number | null;
   reviewTaskCount?: number | null;
+  sourceStatus?: string | null;
   action?: {
     label: string;
     href: string;
@@ -72,6 +73,7 @@ function mapRecordToMessage(record: AssistantMessageRecord): AssistantMessage {
     depositedSourceId: record.deposited_source_id,
     itemCount: record.item_count,
     reviewTaskCount: record.review_task_count,
+    sourceStatus: record.source_status,
     nodeRefs: record.node_refs,
     suggestedQuestions: record.suggested_questions,
     action:
@@ -243,25 +245,54 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const depositAttachment = useCallback(
     async (fileId: string) => {
       const result = await assistantApi.depositFile(fileId);
-      if (activeConversationId) {
-        await loadMessages(activeConversationId);
-      }
+      // 原地更新该附件状态，避免全量重载触发滚动到底部
+      setMessages((prev) =>
+        prev.map((message) => {
+          if (!message.attachments?.some((att) => att.file_id === fileId)) return message;
+          return {
+            ...message,
+            attachments: message.attachments.map((att) =>
+              att.file_id === fileId
+                ? {
+                    ...att,
+                    status: "deposited",
+                    deposited_source_id: result.source_id,
+                    item_count: result.item_count,
+                    review_task_count: result.review_task_count,
+                    source_status: result.status,
+                  }
+                : att
+            ),
+          };
+        })
+      );
       refreshConversations().catch(() => undefined);
       return result;
     },
-    [activeConversationId, loadMessages, refreshConversations]
+    [refreshConversations]
   );
 
   const depositMessage = useCallback(
     async (messageId: string) => {
       const result = await assistantApi.depositMessage(messageId);
-      if (activeConversationId) {
-        await loadMessages(activeConversationId);
-      }
+      // 原地更新该消息状态，避免全量重载触发滚动到底部
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === messageId
+            ? {
+                ...message,
+                depositedSourceId: result.source_id,
+                itemCount: result.item_count,
+                reviewTaskCount: result.review_task_count,
+                sourceStatus: result.status,
+              }
+            : message
+        )
+      );
       refreshConversations().catch(() => undefined);
       return result;
     },
-    [activeConversationId, loadMessages, refreshConversations]
+    [refreshConversations]
   );
 
   const value = useMemo(

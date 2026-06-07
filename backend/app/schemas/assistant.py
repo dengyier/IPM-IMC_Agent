@@ -18,6 +18,7 @@ class AssistantAttachment(BaseModel):
     deposited_source_id: str | None = None
     item_count: int | None = None
     review_task_count: int | None = None
+    source_status: str | None = None
     truncated: bool = False
 
 
@@ -131,6 +132,7 @@ class AssistantMessageOut(BaseModel):
     deposited_source_id: str | None = None
     item_count: int | None = None
     review_task_count: int | None = None
+    source_status: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

@@ -277,6 +277,7 @@ export interface AssistantAttachment {
   deposited_source_id?: string | null;
   item_count?: number | null;
   review_task_count?: number | null;
+  source_status?: string | null;
   truncated?: boolean;
 }
 
@@ -305,6 +306,7 @@ export interface AssistantMessageRecord {
   deposited_source_id?: string | null;
   item_count?: number | null;
   review_task_count?: number | null;
+  source_status?: string | null;
   created_at: string;
 }
 
