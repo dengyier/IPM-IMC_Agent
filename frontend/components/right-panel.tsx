@@ -376,12 +376,15 @@ function AttachmentCard({
 }) {
   const isDeposited = Boolean(attachment.deposited_source_id || attachment.status === "deposited");
   const pendingReview = attachment.review_task_count ?? 0;
-  const reviewed = isDeposited && pendingReview === 0;
+  const rejected = isDeposited && attachment.source_status === "rejected";
+  const reviewed = isDeposited && pendingReview === 0 && !rejected;
   const sizeText =
     isDeposited
-      ? reviewed
-        ? "已沉淀 · 已审核"
-        : `已沉淀 · 待审核 ${pendingReview} 条`
+      ? rejected
+        ? "已沉淀 · 被拒绝"
+        : reviewed
+          ? "已沉淀 · 已审核"
+          : `已沉淀 · 待审核 ${pendingReview} 条`
       : typeof attachment.chunk_count === "number" && attachment.chunk_count > 0
         ? `已解析全文 · ${attachment.chunk_count} 个片段可追问`
         : typeof attachment.chars === "number" && attachment.chars > 0
@@ -431,7 +434,7 @@ function AttachmentCard({
           {depositing ? "沉淀中" : "沉淀为资料"}
         </button>
       )}
-      {isDeposited && !reviewed && (
+      {isDeposited && !reviewed && !rejected && (
         <a
           href="/review"
           onClick={(event) => event.stopPropagation()}
@@ -444,6 +447,23 @@ function AttachmentCard({
         >
           去审核
         </a>
+      )}
+      {rejected && fileId && (
+        <button
+          type="button"
+          disabled={depositing}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onDeposit?.(fileId);
+          }}
+          className={cn(
+            "shrink-0 rounded-lg px-2 py-1 text-[11px] font-bold transition disabled:cursor-not-allowed disabled:opacity-60",
+            tone === "sent" ? "bg-white/20 text-white hover:bg-white/25" : "bg-rose-50 text-rose-600 hover:bg-rose-100"
+          )}
+        >
+          {depositing ? "重新提交中" : "重新提交"}
+        </button>
       )}
       {reviewed && (
         <span
@@ -564,6 +584,16 @@ function MessageBubble({
                   <Icon name="clipboard-check" className="h-3.5 w-3.5" />
                   已沉淀 · 去审核 {message.reviewTaskCount} 条
                 </a>
+              ) : message.sourceStatus === "rejected" ? (
+                <button
+                  type="button"
+                  disabled={loading || depositingMessageId === message.id}
+                  onClick={() => onDepositMessage(message.id)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-rose-50 px-2.5 py-1.5 text-[12px] font-bold text-rose-600 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Icon name={depositingMessageId === message.id ? "refresh" : "refresh"} className={cn("h-3.5 w-3.5", depositingMessageId === message.id && "animate-spin")} />
+                  {depositingMessageId === message.id ? "重新提交中" : "已驳回 · 重新提交"}
+                </button>
               ) : (
                 <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[12px] font-bold text-emerald-600">
                   <Icon name="check-circle" className="h-3.5 w-3.5" />
@@ -1000,6 +1030,16 @@ function FocusMessage({
                   <Icon name="clipboard-check" className="h-3.5 w-3.5" />
                   已沉淀 · 去审核 {message.reviewTaskCount} 条
                 </a>
+              ) : message.sourceStatus === "rejected" ? (
+                <button
+                  type="button"
+                  disabled={loading || depositingMessageId === message.id}
+                  onClick={() => onDepositMessage(message.id)}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-rose-50 px-3 py-2 text-[13px] font-bold text-rose-600 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Icon name="refresh" className={cn("h-3.5 w-3.5", depositingMessageId === message.id && "animate-spin")} />
+                  {depositingMessageId === message.id ? "重新提交中" : "已驳回 · 重新提交"}
+                </button>
               ) : (
                 <span className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 px-3 py-2 text-[13px] font-bold text-emerald-600">
                   <Icon name="check-circle" className="h-3.5 w-3.5" />

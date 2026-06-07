@@ -159,6 +159,7 @@ def _to_message_out(
                     **att,
                     "item_count": counts["item_count"],
                     "review_task_count": counts["review_task_count"],
+                    "source_status": counts["source_status"],
                 }
             rebuilt.append(att)
         attachments = rebuilt
@@ -175,6 +176,7 @@ def _to_message_out(
         deposited_source_id=message.deposited_source_id,
         item_count=(source_counts or {}).get("item_count"),
         review_task_count=(source_counts or {}).get("review_task_count"),
+        source_status=(source_counts or {}).get("source_status"),
         created_at=message.created_at,
     )
 
@@ -343,7 +345,8 @@ def _retrieve_conversation_file_context(
     return "\n\n".join(snippets)[:9000]
 
 
-def _source_counts(db: Session, source_id: str) -> dict[str, int]:
+def _source_counts(db: Session, source_id: str) -> dict[str, object]:
+    source = db.get(ExpansionSource, source_id)
     return {
         "item_count": db.query(ExpansionItem).filter(ExpansionItem.source_id == source_id).count(),
         # review_task_count 表示「仍待审核」的任务数：审核通过/驳回后递减，归零即全部审完。
@@ -356,6 +359,8 @@ def _source_counts(db: Session, source_id: str) -> dict[str, int]:
             )
             .count()
         ),
+        # source_status：pending_review / reviewed（有采纳）/ rejected（全部驳回）/ extraction_empty
+        "source_status": source.status if source else None,
     }
 
 
@@ -794,14 +799,21 @@ def deposit_file_to_expansion(
 
     if assistant_file.deposited_source_id:
         source = db.get(ExpansionSource, assistant_file.deposited_source_id)
-        if source and (tid is None or source.tenant_id == tid):
+        # 已驳回的沉淀允许「重新提交」：跳过早返回，走下方重新沉淀流程生成新审核任务。
+        if (
+            source
+            and (tid is None or source.tenant_id == tid)
+            and source.status != "rejected"
+        ):
             counts = _source_counts(db, source.id)
+            item_count = int(counts["item_count"] or 0)
+            review_task_count = int(counts["review_task_count"] or 0)
             _sync_deposited_attachment_meta(
                 db,
                 assistant_file,
                 source.id,
-                counts["item_count"],
-                counts["review_task_count"],
+                item_count,
+                review_task_count,
             )
             db.commit()
             return AssistantDepositFileResponse(
@@ -810,8 +822,8 @@ def deposit_file_to_expansion(
                 title=source.title,
                 status=source.status,
                 chunk_count=assistant_file.chunk_count,
-                item_count=counts["item_count"],
-                review_task_count=counts["review_task_count"],
+                item_count=item_count,
+                review_task_count=review_task_count,
                 vector_backend=expansion_store.backend,
                 message="该附件已沉淀为正式资料，可前往人工审核台处理。",
             )
@@ -924,15 +936,20 @@ def deposit_message_to_expansion(
 
     if assistant_message.deposited_source_id:
         source = db.get(ExpansionSource, assistant_message.deposited_source_id)
-        if source and (tid is None or source.tenant_id == tid):
+        # 已驳回的沉淀允许「重新提交」：跳过早返回，走下方重新沉淀流程生成新审核任务。
+        if (
+            source
+            and (tid is None or source.tenant_id == tid)
+            and source.status != "rejected"
+        ):
             counts = _source_counts(db, source.id)
             return AssistantDepositMessageResponse(
                 message_id=assistant_message.id,
                 source_id=source.id,
                 title=source.title,
                 status=source.status,
-                item_count=counts["item_count"],
-                review_task_count=counts["review_task_count"],
+                item_count=int(counts["item_count"] or 0),
+                review_task_count=int(counts["review_task_count"] or 0),
                 vector_backend=expansion_store.backend,
                 message="该对话结果已沉淀为正式资料，可前往人工审核台处理。",
             )
