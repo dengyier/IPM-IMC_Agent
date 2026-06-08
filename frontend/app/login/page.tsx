@@ -64,9 +64,10 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-6 py-10">
-      <section className="grid w-full max-w-[1040px] grid-cols-[1.05fr_0.95fr] overflow-hidden rounded-[28px] border border-line bg-white shadow-[0_28px_90px_rgba(30,58,138,0.12)]">
-        <div className="relative min-h-[620px] overflow-hidden bg-[#f5f7ff] px-12 py-11">
+    <main className="flex min-h-screen items-center justify-center px-4 py-6 md:px-6 md:py-10">
+      <section className="grid w-full max-w-[1040px] grid-cols-1 overflow-hidden rounded-[28px] border border-line bg-white shadow-[0_28px_90px_rgba(30,58,138,0.12)] md:grid-cols-[1.05fr_0.95fr]">
+        {/* 左侧品牌介绍区 - 移动端隐藏 */}
+        <div className="relative hidden min-h-[620px] overflow-hidden bg-[#f5f7ff] px-12 py-11 md:block">
           <div className="absolute inset-x-0 bottom-0 h-72 bg-[radial-gradient(circle_at_45%_70%,rgba(91,75,255,0.24),transparent_46%)]" />
           <div className="relative z-10">
             <div className="flex items-center gap-3">
@@ -98,18 +99,30 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <div className="flex min-h-[620px] flex-col justify-center px-12 py-11">
+        {/* 右侧登录表单区 */}
+        <div className="flex min-h-[620px] flex-col justify-center px-6 py-8 md:px-12 md:py-11">
+          {/* 移动端顶部品牌标识 */}
+          <div className="mb-8 flex items-center justify-center gap-3 md:hidden">
+            <div className="brand-gradient flex h-10 w-10 items-center justify-center rounded-xl shadow-soft">
+              <Icon name="boxes" className="h-5 w-5 text-white" />
+            </div>
+            <div>
+              <div className="text-[18px] font-black text-ink">天机AI</div>
+              <div className="text-[12px] font-semibold text-slate-500">商业决策智能体</div>
+            </div>
+          </div>
+
           <div>
-            <div className="text-[28px] font-black text-ink">手机号验证码登录</div>
-            <p className="mt-3 text-[14px] leading-7 text-slate-500">
+            <div className="text-[24px] font-black text-ink md:text-[28px]">手机号验证码登录</div>
+            <p className="mt-2 text-[13px] leading-6 text-slate-500 md:mt-3 md:text-[14px] md:leading-7">
               输入手机号获取一次性验证码，登录天机AI工作台。
             </p>
           </div>
 
-          <form onSubmit={handleLogin} className="mt-9 space-y-5">
+          <form onSubmit={handleLogin} className="mt-6 space-y-4 md:mt-9 md:space-y-5">
             <label className="block">
               <span className="text-[13px] font-bold text-[#172452]">手机号</span>
-              <div className="mt-2 flex h-[52px] items-center rounded-2xl border border-line bg-white px-4 focus-within:border-brand/60">
+              <div className="mt-2 flex h-[50px] items-center rounded-2xl border border-line bg-white px-4 focus-within:border-brand/60 md:h-[52px]">
                 <span className="mr-3 text-[14px] font-bold text-slate-400">+86</span>
                 <input
                   value={phone}
@@ -123,7 +136,7 @@ export default function LoginPage() {
 
             <label className="block">
               <span className="text-[13px] font-bold text-[#172452]">短信验证码</span>
-              <div className="mt-2 flex h-[52px] items-center gap-3">
+              <div className="mt-2 flex h-[50px] items-center gap-2 md:h-[52px] md:gap-3">
                 <input
                   value={code}
                   onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
@@ -135,7 +148,7 @@ export default function LoginPage() {
                   type="button"
                   disabled={!canSendCode}
                   onClick={handleSendCode}
-                  className="h-12 min-w-[128px] rounded-2xl border border-indigo-100 bg-[#f4f2ff] px-4 text-[13px] font-black text-brand transition-colors hover:bg-[#ece8ff] disabled:cursor-not-allowed disabled:opacity-55"
+                  className="h-12 min-w-[108px] rounded-2xl border border-indigo-100 bg-[#f4f2ff] px-3 text-[13px] font-black text-brand transition-colors hover:bg-[#ece8ff] disabled:cursor-not-allowed disabled:opacity-55 md:min-w-[128px] md:px-4"
                 >
                   {sending ? "发送中" : countdown > 0 ? `${countdown}s` : "获取验证码"}
                 </button>

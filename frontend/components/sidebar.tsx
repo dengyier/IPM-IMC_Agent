@@ -11,7 +11,7 @@ import { useAuth } from "./auth-context";
 import { UserAccountMenu } from "./user-account-menu";
 import { FeedbackDialog } from "./feedback-dialog";
 
-export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
+export function Sidebar({ activeKey = "home", showMobileMenu = true }: { activeKey?: string; showMobileMenu?: boolean }) {
   const { user } = useAuth();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState(false);
@@ -25,11 +25,13 @@ export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
       .summary()
       .then((data) => {
         if (!cancelled) {
+          console.log('Dashboard summary data:', data);
           setSummary(data);
           setError(false);
         }
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error('Dashboard summary error:', err);
         if (!cancelled) setError(true);
       });
     return () => {
@@ -41,14 +43,16 @@ export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setMobileOpen(true)}
-        className="fixed left-4 top-4 z-30 flex h-10 w-10 items-center justify-center rounded-2xl border border-line bg-white/90 text-[#172452] shadow-[0_12px_30px_rgba(15,23,42,0.08)] backdrop-blur md:hidden"
-        title="打开菜单"
-      >
-        <Icon name="list" className="h-5 w-5" />
-      </button>
+      {showMobileMenu && (
+        <button
+          type="button"
+          onClick={() => setMobileOpen(true)}
+          className="fixed left-4 top-4 z-30 flex h-10 w-10 items-center justify-center rounded-2xl border border-line bg-white/90 text-[#172452] shadow-[0_12px_30px_rgba(15,23,42,0.08)] backdrop-blur md:hidden"
+          title="打开菜单"
+        >
+          <Icon name="list" className="h-5 w-5" />
+        </button>
+      )}
 
       {mobileOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
@@ -96,12 +100,12 @@ export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
               ))}
             </nav>
 
-            <div className="mx-3 mt-5 overflow-hidden rounded-2xl border border-indigo-100/80 bg-gradient-to-b from-indigo-50 to-white p-4 shadow-card">
-              <div className="text-[13px] font-bold text-brand">知识资产沉淀中</div>
-              <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
-                每一次学习都会沉淀为可复用的知识资产
-              </p>
-              {user?.is_super_admin && (
+            {user?.is_super_admin && (
+              <div className="mx-3 mt-5 overflow-hidden rounded-2xl border border-indigo-100/80 bg-gradient-to-b from-indigo-50 to-white p-4 shadow-card">
+                <div className="text-[13px] font-bold text-brand">知识资产沉淀中</div>
+                <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
+                  每一次学习都会沉淀为可复用的知识资产
+                </p>
                 <a
                   href="/knowledge-graph"
                   onClick={() => setMobileOpen(false)}
@@ -110,14 +114,14 @@ export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
                   查看完整图谱
                   <Icon name="chevron-right" className="h-3.5 w-3.5" />
                 </a>
-              )}
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <AssetStat label="资料总数" value={error ? "—" : sourceTotal !== null ? fmtNum(sourceTotal) : "··"} unit="份" />
-                <AssetStat label="知识节点" value={error ? "—" : summary ? fmtNum(summary.nodes) : "··"} unit="个" />
-                <AssetStat label="关系边" value={error ? "—" : summary ? fmtNum(summary.edges) : "··"} unit="条" />
-                <AssetStat label="待审核" value={error ? "—" : summary ? fmtNum(summary.pending_reviews) : "··"} unit="条" />
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <AssetStat label="资料总数" value={error ? "—" : sourceTotal !== null ? fmtNum(sourceTotal) : "··"} unit="份" />
+                  <AssetStat label="知识节点" value={error ? "—" : summary ? fmtNum(summary.nodes) : "··"} unit="个" />
+                  <AssetStat label="关系边" value={error ? "—" : summary ? fmtNum(summary.edges) : "··"} unit="条" />
+                  <AssetStat label="待审核" value={error ? "—" : summary ? fmtNum(summary.pending_reviews) : "··"} unit="条" />
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="mt-auto border-t border-line">
               <button
@@ -173,13 +177,13 @@ export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
         ))}
       </nav>
 
-      {/* Asset card */}
-      <div className="mx-3 mt-6 overflow-hidden rounded-2xl border border-indigo-100/80 bg-gradient-to-b from-indigo-50 to-white p-4 shadow-card">
-        <div className="text-[13px] font-bold text-brand">知识资产沉淀中</div>
-        <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
-          每一次学习都会沉淀为可复用的知识资产
-        </p>
-        {user?.is_super_admin && (
+      {/* Asset card - 仅超级管理员可见 */}
+      {user?.is_super_admin && (
+        <div className="mx-3 mt-6 overflow-hidden rounded-2xl border border-indigo-100/80 bg-gradient-to-b from-indigo-50 to-white p-4 shadow-card">
+          <div className="text-[13px] font-bold text-brand">知识资产沉淀中</div>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
+            每一次学习都会沉淀为可复用的知识资产
+          </p>
           <a
             href="/knowledge-graph"
             className="mt-3 flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-indigo-100 bg-white/85 text-[12px] font-bold text-brand transition-colors hover:bg-[#f6f5ff]"
@@ -187,24 +191,24 @@ export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
             查看完整图谱
             <Icon name="chevron-right" className="h-3.5 w-3.5" />
           </a>
-        )}
-        <div className="mt-4 space-y-3">
-          <AssetStat label="资料总数" value={error ? "—" : sourceTotal !== null ? fmtNum(sourceTotal) : "··"} unit="份" />
-          <AssetStat label="知识节点总数" value={error ? "—" : summary ? fmtNum(summary.nodes) : "··"} unit="个" />
-          <AssetStat label="关系边总数" value={error ? "—" : summary ? fmtNum(summary.edges) : "··"} unit="条" />
-          <AssetStat label="诊断报告总数" value={error ? "—" : summary ? fmtNum(summary.reports) : "··"} unit="份" />
-          <AssetStat label="待审核任务" value={error ? "—" : summary ? fmtNum(summary.pending_reviews) : "··"} unit="条" />
-        </div>
-        <div className="mt-2 flex justify-center pb-1 pt-1">
-          <div className="isometric-blocks">
-            <span className="left-[16px] top-[70px] h-[22px] w-[104px] rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500" />
-            <span className="left-[34px] top-[52px] h-[28px] w-[34px] rounded-lg bg-gradient-to-br from-[#4c43df] to-[#7f6bff]" />
-            <span className="left-[73px] top-[34px] h-[48px] w-[34px] rounded-lg bg-gradient-to-br from-[#7d66ff] to-[#b49aff]" />
-            <span className="left-[88px] top-[58px] h-[25px] w-[18px] rounded-md bg-white/40" />
-            <span className="left-[19px] top-[83px] h-[12px] w-[76px] rounded-lg bg-gradient-to-r from-blue-500 to-violet-400 opacity-70" />
+          <div className="mt-4 space-y-3">
+            <AssetStat label="资料总数" value={error ? "—" : sourceTotal !== null ? fmtNum(sourceTotal) : "··"} unit="份" />
+            <AssetStat label="知识节点总数" value={error ? "—" : summary ? fmtNum(summary.nodes) : "··"} unit="个" />
+            <AssetStat label="关系边总数" value={error ? "—" : summary ? fmtNum(summary.edges) : "··"} unit="条" />
+            <AssetStat label="诊断报告总数" value={error ? "—" : summary ? fmtNum(summary.reports) : "··"} unit="份" />
+            <AssetStat label="待审核任务" value={error ? "—" : summary ? fmtNum(summary.pending_reviews) : "··"} unit="条" />
+          </div>
+          <div className="mt-2 flex justify-center pb-1 pt-1">
+            <div className="isometric-blocks">
+              <span className="left-[16px] top-[70px] h-[22px] w-[104px] rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500" />
+              <span className="left-[34px] top-[52px] h-[28px] w-[34px] rounded-lg bg-gradient-to-br from-[#4c43df] to-[#7f6bff]" />
+              <span className="left-[73px] top-[34px] h-[48px] w-[34px] rounded-lg bg-gradient-to-br from-[#7d66ff] to-[#b49aff]" />
+              <span className="left-[88px] top-[58px] h-[25px] w-[18px] rounded-md bg-white/40" />
+              <span className="left-[19px] top-[83px] h-[12px] w-[76px] rounded-lg bg-gradient-to-r from-blue-500 to-violet-400 opacity-70" />
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* User */}
       <div className="mt-auto border-t border-line">

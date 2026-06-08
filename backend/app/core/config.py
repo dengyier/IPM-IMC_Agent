@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "IMC&IPM 商业决策智能体"
+    app_name: str = "天机AI 商业决策智能体"
     environment: str = "local"
 
     # 数据库：PostgreSQL（生产）/ SQLite（本地回退）

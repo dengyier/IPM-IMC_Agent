@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 
 import { Card } from "@/components/card";
 import { Icon } from "@/components/icon";
+import { PendingTaskBell } from "@/components/pending-task-bell";
+import { useIsMobile } from "@/components/mobile/use-is-mobile";
 import {
   ApiError,
   DiagnoseResult,
@@ -19,6 +21,18 @@ import {
   moduleLabel,
 } from "@/lib/presentation";
 import { cn } from "@/lib/utils";
+
+const MODULE_ICONS: Record<string, string> = {
+  customer_segments: "users",
+  value_propositions: "sparkles",
+  channels: "send",
+  customer_relationships: "link",
+  revenue_streams: "money",
+  key_resources: "boxes",
+  key_activities: "clipboard-check",
+  key_partners: "share",
+  cost_structure: "bar-chart",
+};
 
 const STEPS = ["填写项目与画布", "提交诊断", "AI 分析", "生成报告"];
 
@@ -50,6 +64,7 @@ export function CanvasDiagnosisPage() {
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [result, setResult] = useState<DiagnoseResult | null>(null);
   const [reportsRefreshKey, setReportsRefreshKey] = useState(0);
+  const isMobile = useIsMobile();
 
   const setModule = (k: string, v: string) => setCanvas((p) => ({ ...p, [k]: v }));
 
@@ -111,6 +126,29 @@ export function CanvasDiagnosisPage() {
         : phase === "done"
           ? 3
           : 1;
+
+  if (isMobile === null) return null;
+  if (isMobile) {
+    return (
+      <MobileCanvasForm
+        title={title}
+        company={company}
+        question={question}
+        canvas={canvas}
+        phase={phase}
+        progress={progress}
+        statusMsg={statusMsg}
+        canSubmit={canSubmit}
+        submitHint={missingSubmitReason}
+        onTitle={setTitle}
+        onCompany={setCompany}
+        onQuestion={setQuestion}
+        onModule={setModule}
+        onDiagnose={handleDiagnose}
+        result={result}
+      />
+    );
+  }
 
   return (
     <main className="flex min-w-0 flex-1 overflow-hidden">
@@ -552,5 +590,237 @@ function ResultList({
         ))}
       </div>
     </div>
+  );
+}
+
+// ----------------------------------------------------------------------------- //
+// 移动端：商业画布诊断（字段行列表 + 底部编辑 sheet + 固定开始按钮）
+// ----------------------------------------------------------------------------- //
+
+type MobileField = {
+  key: string;
+  label: string;
+  desc: string;
+  icon: string;
+  required: boolean;
+  multiline: boolean;
+};
+
+const MOBILE_FIELDS: MobileField[] = [
+  { key: "title", label: "项目名称", desc: "请输入项目名称", icon: "clipboard", required: true, multiline: false },
+  { key: "company", label: "公司/项目主体", desc: "请输入公司或项目主体名称", icon: "database", required: true, multiline: false },
+  ...CANVAS_MODULE_ORDER.map((m) => ({
+    key: m,
+    label: moduleLabel(m),
+    desc: MODULE_HINTS[m] ?? "",
+    icon: MODULE_ICONS[m] ?? "list-tree",
+    required: true,
+    multiline: true,
+  })),
+  { key: "question", label: "希望重点分析的问题", desc: "告诉我们你最关心的问题（可多条）", icon: "help-circle", required: false, multiline: true },
+];
+
+function MobileCanvasForm({
+  title,
+  company,
+  question,
+  canvas,
+  phase,
+  progress,
+  statusMsg,
+  canSubmit,
+  submitHint,
+  onTitle,
+  onCompany,
+  onQuestion,
+  onModule,
+  onDiagnose,
+  result,
+}: {
+  title: string;
+  company: string;
+  question: string;
+  canvas: Record<string, string>;
+  phase: Phase;
+  progress: number;
+  statusMsg: string | null;
+  canSubmit: boolean;
+  submitHint: string | null;
+  onTitle: (v: string) => void;
+  onCompany: (v: string) => void;
+  onQuestion: (v: string) => void;
+  onModule: (k: string, v: string) => void;
+  onDiagnose: () => void;
+  result: DiagnoseResult | null;
+}) {
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+
+  const getValue = (key: string): string => {
+    if (key === "title") return title;
+    if (key === "company") return company;
+    if (key === "question") return question;
+    return canvas[key] ?? "";
+  };
+  const setValue = (key: string, v: string) => {
+    if (key === "title") onTitle(v);
+    else if (key === "company") onCompany(v);
+    else if (key === "question") onQuestion(v);
+    else onModule(key, v);
+  };
+
+  const requiredKeys = MOBILE_FIELDS.filter((f) => f.required).map((f) => f.key);
+  const filled = requiredKeys.filter((k) => getValue(k).trim()).length;
+  const completion = Math.round((filled / requiredKeys.length) * 100);
+  const running = phase === "running";
+  const editingField = MOBILE_FIELDS.find((f) => f.key === editingKey) ?? null;
+
+  return (
+    <main className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-transparent pb-[168px]">
+      {/* 顶部条 */}
+      <header className="flex h-14 shrink-0 items-center gap-1 pl-16 pr-3">
+        <button
+          onClick={() => window.history.back()}
+          className="flex h-9 w-9 items-center justify-center rounded-full text-[#172452] hover:text-brand"
+          title="返回"
+        >
+          <Icon name="chevron-left" className="h-5 w-5" />
+        </button>
+        <div className="min-w-0 flex-1 truncate text-center text-[15px] font-black text-ink">商业画布诊断</div>
+        <PendingTaskBell />
+        <a href="/chat" className="flex h-9 w-9 items-center justify-center rounded-full text-[#172452] hover:text-brand" title="对话历史">
+          <Icon name="history" className="h-5 w-5" />
+        </a>
+      </header>
+
+      <div className="space-y-2.5 px-4 pt-2">
+        {/* 进度卡 */}
+        <div className="flex items-center gap-4 rounded-2xl border border-line bg-white p-4 shadow-[0_10px_24px_rgba(30,58,138,0.05)]">
+          <ProgressRing value={completion} />
+          <div className="min-w-0 flex-1">
+            <div className="text-[14px] font-bold text-brand">填写越完整，分析越精准</div>
+            <div className="mt-0.5 text-[12px] text-slate-400">完成度 {completion}%</div>
+          </div>
+        </div>
+
+        {/* 字段行 */}
+        {MOBILE_FIELDS.map((field) => {
+          const value = getValue(field.key).trim();
+          return (
+            <button
+              key={field.key}
+              onClick={() => setEditingKey(field.key)}
+              className="flex w-full items-center gap-3 rounded-2xl border border-line bg-white px-4 py-3.5 text-left shadow-[0_8px_20px_rgba(30,58,138,0.04)]"
+            >
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#f4f1ff] text-brand">
+                <Icon name={field.icon} className="h-5 w-5" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1 text-[15px] font-bold text-ink">
+                  {field.label}
+                  {field.required && <span className="text-rose-500">*</span>}
+                </span>
+                <span className={cn("mt-0.5 block truncate text-[12px]", value ? "text-[#3b4a6b]" : "text-slate-400")}>
+                  {value || field.desc}
+                </span>
+              </span>
+              <Icon name="chevron-right" className="h-5 w-5 shrink-0 text-slate-300" />
+            </button>
+          );
+        })}
+
+        {/* 结果（诊断完成后） */}
+        {result && <ResultPanel result={result} />}
+      </div>
+
+      {/* 固定开始按钮（位于底部 Tab 栏之上） */}
+      <div className="fixed inset-x-0 bottom-0 z-30 bg-gradient-to-t from-white via-white to-transparent px-4 pb-[calc(env(safe-area-inset-bottom)+64px)] pt-4">
+        {statusMsg && (
+          <p className="mb-2 text-center text-[12px] font-semibold text-brand">{statusMsg}</p>
+        )}
+        <button
+          onClick={onDiagnose}
+          disabled={!canSubmit}
+          title={submitHint ?? undefined}
+          className="brand-gradient flex h-12 w-full items-center justify-center gap-2 rounded-2xl text-[15px] font-bold text-white shadow-soft disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Icon name={running ? "refresh" : "sparkles"} className={cn("h-5 w-5", running && "animate-spin")} />
+          {running ? `分析中… ${progress}%` : "开始诊断"}
+        </button>
+      </div>
+
+      {/* 字段编辑 sheet */}
+      {editingField && (
+        <div className="fixed inset-0 z-[70] flex flex-col justify-end" onClick={() => setEditingKey(null)}>
+          <div className="absolute inset-0 bg-slate-950/30" />
+          <div
+            className="relative z-10 max-h-[80vh] rounded-t-3xl bg-white px-5 pb-[calc(env(safe-area-inset-bottom)+16px)] pt-5 shadow-[0_-18px_56px_rgba(15,23,42,0.18)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="flex items-center gap-1 text-[16px] font-black text-ink">
+                {editingField.label}
+                {editingField.required && <span className="text-rose-500">*</span>}
+              </h3>
+              <button
+                onClick={() => setEditingKey(null)}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-50 hover:text-brand"
+              >
+                <Icon name="x" className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="mt-1 text-[12px] text-slate-400">{editingField.desc}</p>
+            {editingField.multiline ? (
+              <textarea
+                value={getValue(editingField.key)}
+                onChange={(e) => setValue(editingField.key, e.target.value)}
+                rows={5}
+                autoFocus
+                className="mt-3 w-full resize-none rounded-xl border border-line bg-white px-4 py-3 text-[14px] leading-6 text-ink outline-none focus:border-brand/50"
+                placeholder={editingField.desc}
+              />
+            ) : (
+              <input
+                value={getValue(editingField.key)}
+                onChange={(e) => setValue(editingField.key, e.target.value)}
+                autoFocus
+                className="mt-3 h-12 w-full rounded-xl border border-line bg-white px-4 text-[14px] text-ink outline-none focus:border-brand/50"
+                placeholder={editingField.desc}
+              />
+            )}
+            <button
+              onClick={() => setEditingKey(null)}
+              className="brand-gradient mt-4 h-11 w-full rounded-xl text-[14px] font-bold text-white shadow-soft"
+            >
+              完成
+            </button>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+}
+
+function ProgressRing({ value }: { value: number }) {
+  const r = 18;
+  const c = 2 * Math.PI * r;
+  const offset = c * (1 - Math.max(0, Math.min(100, value)) / 100);
+  return (
+    <span className="relative flex h-12 w-12 shrink-0 items-center justify-center">
+      <svg viewBox="0 0 44 44" className="h-12 w-12 -rotate-90">
+        <circle cx="22" cy="22" r={r} fill="none" stroke="#ece9ff" strokeWidth="5" />
+        <circle
+          cx="22"
+          cy="22"
+          r={r}
+          fill="none"
+          stroke="#5b4bff"
+          strokeWidth="5"
+          strokeLinecap="round"
+          strokeDasharray={c}
+          strokeDashoffset={offset}
+        />
+      </svg>
+      <span className="absolute text-[11px] font-black text-brand">{value}%</span>
+    </span>
   );
 }

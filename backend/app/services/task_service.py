@@ -28,8 +28,26 @@ logger = logging.getLogger(__name__)
 # 少量 worker 即可：这些任务以 LLM / IO 等待为主，且本地 SQLite 写并发不宜过高。
 _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="task")
 
-# work_fn 接收后台线程的全新 Session，返回结果（pydantic 模型或 dict）。
-WorkFn = Callable[[Session], BaseModel | dict[str, Any]]
+
+class ProgressCallback:
+    """进度回调类，用于在任务执行过程中更新进度。"""
+    
+    def __init__(self, db: Session, task_id: str):
+        self.db = db
+        self.task_id = task_id
+    
+    def update(self, progress: int, message: str | None = None) -> None:
+        """更新任务进度（0-100）。"""
+        task = self.db.get(Task, self.task_id)
+        if task is not None:
+            task.progress = max(10, min(99, progress))  # 限制在 10-99 之间
+            if message:
+                logger.info("Task %s: %d%% - %s", self.task_id, progress, message)
+            self.db.commit()
+
+
+# work_fn 接收后台线程的全新 Session 和进度回调，返回结果（pydantic 模型或 dict）。
+WorkFn = Callable[[Session, ProgressCallback], BaseModel | dict[str, Any]]
 
 
 def create_task(
@@ -73,8 +91,11 @@ def _run(task_id: str, work_fn: WorkFn) -> None:
         task.progress = 10
         db.commit()
 
+        # 创建进度回调
+        progress_callback = ProgressCallback(db, task_id)
+
         try:
-            result = work_fn(db)
+            result = work_fn(db, progress_callback)
         except ValueError as exc:  # 业务校验类错误
             db.rollback()
             _fail(db, task_id, str(exc))

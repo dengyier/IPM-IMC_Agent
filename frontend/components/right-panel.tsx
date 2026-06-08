@@ -9,7 +9,6 @@ import { ApiError, assistantApi } from "@/lib/api";
 import { suggestionChips } from "@/lib/data";
 import { useAssistant } from "./assistant-context";
 import { useAuth } from "./auth-context";
-import { PendingTaskBell } from "./pending-task-bell";
 import { cn } from "@/lib/utils";
 
 // 工作台首页对话工作区：左侧全局导航之外的「中·对话主区 + 右·会话列表（可收起）」。
@@ -177,37 +176,70 @@ function ChatMain({
     <>
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* 顶部细条 */}
-        <div className="flex h-14 shrink-0 items-center justify-end gap-1.5 pl-16 pr-3 md:gap-2 md:px-8">
+        <div className="flex h-14 shrink-0 items-center gap-1.5 pl-16 pr-3 md:justify-end md:gap-2 md:px-8">
+          {/* 移动端：居中标题 */}
+          <div className="min-w-0 flex-1 truncate text-center text-[15px] font-black text-ink md:hidden">
+            天机AI 商业决策智能体
+          </div>
+          {/* 桌面端：当前会话 chip */}
           {activeConversation && hasConversation && (
-            <span className="mr-auto inline-flex max-w-[42vw] items-center gap-1.5 rounded-lg bg-[#f7f5ff] px-2.5 py-1 text-[11px] font-bold text-brand md:max-w-[50%]">
+            <span className="mr-auto hidden max-w-[50%] items-center gap-1.5 rounded-lg bg-[#f7f5ff] px-2.5 py-1 text-[11px] font-bold text-brand md:inline-flex">
               <Icon name="history" className="h-3.5 w-3.5" />
               <span className="truncate">当前会话：{activeConversationTitle}</span>
             </span>
           )}
-          <PendingTaskBell />
+          <button
+            onClick={() => {
+              // 新建会话：清空当前对话
+              window.location.href = "/chat";
+            }}
+            className="flex h-10 w-10 items-center justify-center rounded-full text-[#172452] transition-colors hover:bg-white hover:text-brand"
+            title="新建会话"
+          >
+            <Icon name="edit" className="h-[19px] w-[19px]" />
+          </button>
           <button
             onClick={() => setFocusOpen(true)}
-            className="flex h-10 items-center gap-2 rounded-full px-2.5 text-[13px] font-bold text-[#172452] transition-colors hover:bg-white hover:text-brand md:px-3"
+            className="hidden h-10 items-center gap-2 rounded-full px-2.5 text-[13px] font-bold text-[#172452] transition-colors hover:bg-white hover:text-brand md:flex md:px-3"
             title="打开专注对话"
           >
             <Icon name="panel" className="h-[18px] w-[18px]" />
             <span className="hidden sm:inline">专注</span>
           </button>
-          <button className="flex h-10 w-10 items-center justify-center rounded-full text-[#172452] transition-colors hover:bg-white hover:text-brand">
+          <button className="hidden h-10 w-10 items-center justify-center rounded-full text-[#172452] transition-colors hover:bg-white hover:text-brand md:flex">
             <Icon name="help-circle" className="h-[19px] w-[19px]" />
           </button>
           <button
             onClick={onToggleConv}
             className={cn(
-              "flex h-10 items-center gap-2 rounded-full px-2.5 text-[13px] font-bold transition-colors hover:bg-white hover:text-brand md:px-3",
+              "flex h-10 w-10 items-center justify-center rounded-full transition-colors hover:bg-white hover:text-brand md:w-auto md:gap-2 md:px-3",
               convOpen ? "text-brand" : "text-[#172452]"
             )}
-            title={convOpen ? "收起会话列表" : "展开会话列表"}
+            title={convOpen ? "收起会话列表" : "会话列表"}
           >
-            <Icon name="history" className="h-[18px] w-[18px]" />
-            <span className="hidden sm:inline">会话</span>
+            <Icon name="history" className="h-[19px] w-[19px] md:h-[18px] md:w-[18px]" />
+            <span className="hidden text-[13px] font-bold sm:inline">会话</span>
           </button>
         </div>
+
+        {/* 移动端：当前会话卡（点击打开会话列表） */}
+        {hasConversation && activeConversation && (
+          <button
+            onClick={onToggleConv}
+            className="mx-4 mt-1 mb-1 flex shrink-0 items-center gap-3 rounded-2xl border border-line bg-white px-4 py-3 text-left shadow-[0_10px_24px_rgba(30,58,138,0.05)] md:hidden"
+          >
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#f0edff] text-brand">
+              <Icon name="history" className="h-[18px] w-[18px]" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[14px] font-bold text-ink">{activeConversationTitle}</span>
+              <span className="block text-[11px] text-slate-400">
+                {messages.filter((m) => m.id !== "welcome").length} 条消息
+              </span>
+            </span>
+            <Icon name="chevron-right" className="h-5 w-5 shrink-0 text-slate-300" />
+          </button>
+        )}
 
         {/* 中部：Hero（空状态）或消息流 */}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 md:px-8">
@@ -247,7 +279,8 @@ function ChatMain({
         </div>
 
         {/* 底部输入条 */}
-        <div className="shrink-0 px-4 pb-[calc(env(safe-area-inset-bottom)+14px)] pt-2 md:px-8 md:pb-6">
+        {/* 移动端底部留出固定 Tab 栏(/chat)空间，桌面端不受影响(md:pb-6) */}
+        <div className="shrink-0 px-4 pb-[calc(env(safe-area-inset-bottom)+74px)] pt-2 md:px-8 md:pb-6">
           <input
             ref={fileInputRef}
             type="file"
@@ -506,14 +539,20 @@ function MessageBubble({
 }) {
   const messageDeposited = Boolean(message.depositedSourceId);
   const canDepositMessage = message.role === "assistant" && message.id !== "welcome";
+  const isAssistant = message.role !== "user";
   return (
-    <div className="w-full">
+    <div className={cn("w-full", isAssistant && "flex items-start gap-2.5 md:block")}>
+      {isAssistant && (
+        <span className="brand-gradient mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-white md:hidden">
+          <Icon name="boxes" className="h-4 w-4" />
+        </span>
+      )}
       <div
         className={cn(
           "rounded-2xl px-4 py-3.5 text-[14px] leading-7 md:text-[13px] md:leading-6",
           message.role === "user"
             ? "ml-auto max-w-[88%] bg-brand text-white shadow-[0_12px_28px_rgba(91,75,255,0.18)] md:max-w-[680px]"
-            : "max-w-full border border-line bg-white text-slate-650 shadow-[0_10px_24px_rgba(30,58,138,0.05)] md:max-w-[820px]"
+            : "min-w-0 flex-1 border border-line bg-white text-slate-650 shadow-[0_10px_24px_rgba(30,58,138,0.05)] md:max-w-[820px] md:flex-none"
         )}
       >
         <div className="whitespace-pre-line">{message.content}</div>
