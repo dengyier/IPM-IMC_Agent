@@ -10,7 +10,6 @@ import { useAuth } from "@/components/auth-context";
 import { MobileTabBar } from "@/components/mobile/tab-bar";
 import { DashboardSummary, dashboardApi } from "@/lib/api";
 import { fmtNum } from "@/lib/presentation";
-import { cn } from "@/lib/utils";
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -47,7 +46,6 @@ export function MobileProfile() {
 
   const roleLabel = user?.is_super_admin ? "超管" : "成员";
   const sourceTotal = summary ? summary.methodology_sources + summary.expansion_sources : null;
-  const assetHref = user?.is_super_admin ? "/knowledge-graph" : "/data-dashboard";
 
   const stats = [
     { label: "资料总数", value: sourceTotal !== null ? fmtNum(sourceTotal) : "··", unit: "份", icon: "layers" },
@@ -60,13 +58,9 @@ export function MobileProfile() {
     { icon: "users", label: "个人资料", href: "/settings" },
     { icon: "bot", label: "我的会话", href: "/chat" },
     { icon: "file-bar-chart", label: "诊断报告", href: "/reports" },
-    { icon: "layers", label: "知识资产", href: assetHref },
-    { icon: "bell", label: "通知消息", href: "/review", badge: summary?.pending_reviews || 0 },
   ];
   const secondaryMenu: MenuItem[] = [
     { icon: "pencil", label: "意见反馈", onClick: () => setFeedbackOpen(true) },
-    { icon: "help-circle", label: "帮助中心", href: "#" },
-    { icon: "shield", label: "关于产品", href: "#" },
   ];
 
   return (

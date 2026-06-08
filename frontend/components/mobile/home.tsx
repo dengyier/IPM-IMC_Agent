@@ -3,21 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { Icon } from "@/components/icon";
-import { PendingTaskBell } from "@/components/pending-task-bell";
 import { useAuth } from "@/components/auth-context";
 import { MobileTabBar } from "@/components/mobile/tab-bar";
 import {
   AssistantConversationRecord,
   DashboardSummary,
-  RecentReport,
-  RecentReviewTask,
   assistantApi,
   dashboardApi,
 } from "@/lib/api";
 import { navItems } from "@/lib/data";
 import { canAccessNavItem } from "@/lib/authz";
-import { fmtNum, reviewTaskTypeLabel } from "@/lib/presentation";
-import { cn } from "@/lib/utils";
+import { fmtNum } from "@/lib/presentation";
 
 function fmtRelative(iso: string | null): string {
   if (!iso) return "";
@@ -40,26 +36,14 @@ const FEATURE_DESC: Record<string, string> = {
   reports: "查看与管理报告",
 };
 
-type ActivityItem = {
-  id: string;
-  icon: string;
-  text: string;
-  time: string;
-  href: string;
-};
-
 export function MobileHome() {
   const { user } = useAuth();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [conversations, setConversations] = useState<AssistantConversationRecord[]>([]);
-  const [reports, setReports] = useState<RecentReport[]>([]);
-  const [reviews, setReviews] = useState<RecentReviewTask[]>([]);
 
   useEffect(() => {
     dashboardApi.summary().then(setSummary).catch(() => undefined);
     assistantApi.conversations().then(setConversations).catch(() => undefined);
-    dashboardApi.recentReports(5).then(setReports).catch(() => undefined);
-    dashboardApi.recentReviewTasks(5).then(setReviews).catch(() => undefined);
   }, []);
 
   const features = useMemo(
@@ -77,40 +61,6 @@ export function MobileHome() {
   const sourceTotal = summary
     ? summary.methodology_sources + summary.expansion_sources
     : null;
-
-  const activities = useMemo<ActivityItem[]>(() => {
-    const items: ActivityItem[] = [];
-    if (lastConversation) {
-      items.push({
-        id: `conv-${lastConversation.id}`,
-        icon: "bot",
-        text: `继续对话：${lastConversation.title}`,
-        time: fmtRelative(lastConversation.updated_at),
-        href: "/chat",
-      });
-    }
-    for (const r of reports.slice(0, 3)) {
-      items.push({
-        id: `rep-${r.id}`,
-        icon: "file-bar-chart",
-        text: `诊断报告已生成：《${r.title}》`,
-        time: fmtRelative(r.created_at),
-        href: "/reports",
-      });
-    }
-    if (user?.can_review) {
-      for (const rv of reviews.slice(0, 2)) {
-        items.push({
-          id: `rev-${rv.id}`,
-          icon: "users",
-          text: `待审核：${reviewTaskTypeLabel(rv.task_type)}`,
-          time: fmtRelative(rv.created_at),
-          href: "/review",
-        });
-      }
-    }
-    return items.slice(0, 5);
-  }, [lastConversation, reports, reviews, user]);
 
   const assetHref = user?.is_super_admin ? "/knowledge-graph" : "/data-dashboard";
 
@@ -209,30 +159,6 @@ export function MobileHome() {
           </div>
         )}
 
-        {/* 最近活动 */}
-        <div className="rounded-2xl border border-line bg-white p-4 shadow-[0_10px_28px_rgba(30,58,138,0.05)]">
-          <div className="flex items-center justify-between">
-            <div className="text-[14px] font-bold text-ink">最近活动 / 推荐行动</div>
-            <a href="/reports" className="text-[12px] font-bold text-brand">查看全部</a>
-          </div>
-          <div className="mt-3 divide-y divide-line">
-            {activities.length === 0 && (
-              <p className="py-6 text-center text-[12.5px] text-slate-400">暂无活动，开始一段对话吧</p>
-            )}
-            {activities.map((a) => (
-              <a key={a.id} href={a.href} className="flex items-center gap-3 py-3">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#f4f1ff] text-brand">
-                  <Icon name={a.icon} className="h-4 w-4" />
-                </span>
-                <div className="min-w-0 flex-1 truncate text-[13px] font-medium text-[#172452]">
-                  {a.text}
-                </div>
-                {a.time && <span className="shrink-0 text-[11px] text-slate-400">{a.time}</span>}
-                <Icon name="chevron-right" className="h-4 w-4 shrink-0 text-slate-300" />
-              </a>
-            ))}
-          </div>
-        </div>
       </div>
 
       <MobileTabBar />
