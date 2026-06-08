@@ -13,7 +13,7 @@ export function Topbar() {
         <h1 className="flex items-center gap-2 text-[23px] font-black tracking-[-0.02em] text-ink">
           你好，{user?.display_name || "用户"} <span className="text-[20px]">👋</span>
         </h1>
-        <p className="mt-1.5 text-[13px] text-slate-500">欢迎使用 IMC&IPM 商业决策智能体</p>
+        <p className="mt-1.5 text-[13px] text-slate-500">欢迎使用 天机AI 商业决策智能体</p>
       </div>
 
       <div className="flex items-center gap-5">

@@ -52,7 +52,7 @@ class BusinessCanvasDiagnosisGraph:
         self.diagnosis_svc = DiagnosisService(llm)
         self.quality_svc = ReportQualityService()
 
-    def run(self, request: DiagnoseRequest) -> DiagnoseResult:
+    def run(self, request: DiagnoseRequest, progress_callback=None) -> DiagnoseResult:
         trace: list[str] = []
         run = self._start_run(
             "business_canvas_diagnosis",
@@ -60,6 +60,8 @@ class BusinessCanvasDiagnosisGraph:
         )
         try:
             # 1. route
+            if progress_callback:
+                progress_callback.update(20, "正在分析问题并路由到相关知识节点...")
             routing = self.routing_svc.route(request.question, request.canvas)
             trace.append(
                 f"路由到意图「{routing.intent}」(匹配度 {routing.matched_score})，"
@@ -67,6 +69,8 @@ class BusinessCanvasDiagnosisGraph:
             )
 
             # 2. fuse
+            if progress_callback:
+                progress_callback.update(40, "正在融合上下文和知识库...")
             context = self.fusion_svc.fuse(
                 request.question, routing, request.canvas, tenant_id=self.tenant_id
             )
@@ -77,9 +81,13 @@ class BusinessCanvasDiagnosisGraph:
             )
 
             # 3. diagnose
+            if progress_callback:
+                progress_callback.update(60, "正在生成诊断报告...")
             payload, used_llm = self.diagnosis_svc.diagnose(request, routing, context)
             trace.append(f"生成诊断报告（{'LLM' if used_llm else '本地回退'}）")
 
+            if progress_callback:
+                progress_callback.update(80, "正在保存报告...")
             report = DiagnosisReport(
                 tenant_id=self.tenant_id,
                 title=request.title,
@@ -110,6 +118,8 @@ class BusinessCanvasDiagnosisGraph:
             self.db.flush()
 
             # 4. quality check
+            if progress_callback:
+                progress_callback.update(90, "正在进行质量检查...")
             qc = self.quality_svc.check(payload, context, request.canvas)
             quality = ReportQualityCheck(
                 tenant_id=self.tenant_id,

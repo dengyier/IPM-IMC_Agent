@@ -9,7 +9,7 @@ import { PendingTaskBell } from "@/components/pending-task-bell";
 import { ApiError, EditableSystemSettings, authApi, systemApi } from "@/lib/api";
 
 const DEFAULT_SETTINGS: EditableSystemSettings = {
-  system_name: "IMC&IPM 商业决策智能体",
+  system_name: "天机AI 商业决策智能体",
   system_short_name: "IMC&IPM",
   system_version: "v2.3.1",
   deployment_environment: "生产环境",

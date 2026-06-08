@@ -48,7 +48,7 @@ def diagnose(
     """生成诊断报告为长任务（数十秒~分钟级）：返回 task_id，前端轮询取 result。"""
     tid = user.tenant_id
 
-    def work(bg: Session):
+    def work(bg: Session, progress):
         graph = BusinessCanvasDiagnosisGraph(
             db=bg,
             settings=get_settings(),
@@ -57,7 +57,7 @@ def diagnose(
             llm=get_llm(),
             tenant_id=tid,
         )
-        return graph.run(request)
+        return graph.run(request, progress_callback=progress)
 
     task = task_service.create_task(
         db, "diagnosis.diagnose", input=request.model_dump(mode="json"), tenant_id=tid
@@ -108,7 +108,7 @@ def regenerate_report(
         canvas=dict(report.canvas_input or {}),
     )
 
-    def work(bg: Session):
+    def work(bg: Session, progress):
         graph = BusinessCanvasDiagnosisGraph(
             db=bg,
             settings=get_settings(),
@@ -117,7 +117,7 @@ def regenerate_report(
             llm=get_llm(),
             tenant_id=tid,
         )
-        return graph.run(request)
+        return graph.run(request, progress_callback=progress)
 
     task = task_service.create_task(
         db,

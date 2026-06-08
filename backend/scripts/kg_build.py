@@ -33,7 +33,7 @@ from app.services.methodology_kernel_service import MethodologyKernelService  # 
 from app.services.problem_routing_service import ProblemRoutingService  # noqa: E402
 from app.services.vector_store import VectorStore  # noqa: E402
 
-COURSE_DIR = Path("/Users/molin/Documents/IMC&IPM 商业决策智能体/course")
+COURSE_DIR = Path("/Users/molin/Documents/天机AI 商业决策智能体/course")
 
 # 跳过：扫描件（0 可提取文本）+ 重复文件
 SKIP = {

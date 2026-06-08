@@ -11,11 +11,12 @@ import { useAuth } from "./auth-context";
 import { UserAccountMenu } from "./user-account-menu";
 import { FeedbackDialog } from "./feedback-dialog";
 
-export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
+export function Sidebar({ activeKey = "home", showMobileMenu = true }: { activeKey?: string; showMobileMenu?: boolean }) {
   const { user } = useAuth();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const visibleNavItems = navItems.filter((item) => canAccessNavItem(user, item));
 
   useEffect(() => {
@@ -24,11 +25,13 @@ export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
       .summary()
       .then((data) => {
         if (!cancelled) {
+          console.log('Dashboard summary data:', data);
           setSummary(data);
           setError(false);
         }
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error('Dashboard summary error:', err);
         if (!cancelled) setError(true);
       });
     return () => {
@@ -39,7 +42,111 @@ export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
   const sourceTotal = summary ? summary.methodology_sources + summary.expansion_sources : null;
 
   return (
-    <aside className="flex h-screen w-[212px] shrink-0 flex-col border-r border-line bg-white/92 shadow-[10px_0_38px_rgba(30,58,138,0.035)] backdrop-blur-xl">
+    <>
+      {showMobileMenu && (
+        <button
+          type="button"
+          onClick={() => setMobileOpen(true)}
+          className="fixed left-4 top-4 z-30 flex h-10 w-10 items-center justify-center rounded-2xl border border-line bg-white/90 text-[#172452] shadow-[0_12px_30px_rgba(15,23,42,0.08)] backdrop-blur md:hidden"
+          title="打开菜单"
+        >
+          <Icon name="list" className="h-5 w-5" />
+        </button>
+      )}
+
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <button
+            type="button"
+            aria-label="关闭菜单"
+            className="absolute inset-0 bg-slate-950/28"
+            onClick={() => setMobileOpen(false)}
+          />
+          <aside className="relative z-10 flex h-full w-[82vw] max-w-[304px] flex-col border-r border-line bg-white/96 shadow-[18px_0_56px_rgba(15,23,42,0.18)] backdrop-blur-xl">
+            <div className="flex items-center gap-2.5 px-5 pb-4 pt-5">
+              <div className="brand-gradient flex h-10 w-10 items-center justify-center rounded-[12px] shadow-soft ring-4 ring-indigo-50">
+                <Icon name="boxes" className="h-5 w-5 text-white" strokeWidth={1.9} />
+              </div>
+              <div className="min-w-0 flex-1 leading-tight">
+                <div className="truncate text-[15.5px] font-black tracking-tight text-ink">IMC&IPM</div>
+                <div className="mt-0.5 truncate text-[12px] font-semibold text-ink/85">商业决策智能体</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileOpen(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-50 hover:text-brand"
+                title="关闭菜单"
+              >
+                <Icon name="x" className="h-4 w-4" />
+              </button>
+            </div>
+
+            <nav className="flex flex-col gap-1 px-3">
+              {visibleNavItems.map((item) => (
+                <a
+                  key={item.label}
+                  href={item.href}
+                  onClick={() => setMobileOpen(false)}
+                  className={cn(
+                    "flex items-center gap-3 rounded-xl px-3.5 py-3 text-[14px] transition-all",
+                    item.key === activeKey
+                      ? "bg-[#f0edff] font-semibold text-brand shadow-[inset_0_0_0_1px_rgba(91,75,255,0.06)]"
+                      : "text-[#1c2a54] hover:bg-gray-50 hover:text-brand"
+                  )}
+                >
+                  <Icon name={item.icon} className="h-[18px] w-[18px]" />
+                  <span>{item.label}</span>
+                </a>
+              ))}
+            </nav>
+
+            {user?.is_super_admin && (
+              <div className="mx-3 mt-5 overflow-hidden rounded-2xl border border-indigo-100/80 bg-gradient-to-b from-indigo-50 to-white p-4 shadow-card">
+                <div className="text-[13px] font-bold text-brand">知识资产沉淀中</div>
+                <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
+                  每一次学习都会沉淀为可复用的知识资产
+                </p>
+                <a
+                  href="/knowledge-graph"
+                  onClick={() => setMobileOpen(false)}
+                  className="mt-3 flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-indigo-100 bg-white/85 text-[12px] font-bold text-brand transition-colors hover:bg-[#f6f5ff]"
+                >
+                  查看完整图谱
+                  <Icon name="chevron-right" className="h-3.5 w-3.5" />
+                </a>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <AssetStat label="资料总数" value={error ? "—" : sourceTotal !== null ? fmtNum(sourceTotal) : "··"} unit="份" />
+                  <AssetStat label="知识节点" value={error ? "—" : summary ? fmtNum(summary.nodes) : "··"} unit="个" />
+                  <AssetStat label="关系边" value={error ? "—" : summary ? fmtNum(summary.edges) : "··"} unit="条" />
+                  <AssetStat label="待审核" value={error ? "—" : summary ? fmtNum(summary.pending_reviews) : "··"} unit="条" />
+                </div>
+              </div>
+            )}
+
+            <div className="mt-auto border-t border-line">
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileOpen(false);
+                  setFeedbackOpen(true);
+                }}
+                className="mx-3 mt-3 flex h-10 w-[calc(100%-24px)] items-center gap-2.5 rounded-xl px-3.5 text-[13px] font-semibold text-[#1c2a54] transition-colors hover:bg-[#f0edff] hover:text-brand"
+              >
+                <Icon name="help-circle" className="h-4 w-4" />
+                意见反馈
+              </button>
+              <UserAccountMenu
+                placement="top-start"
+                className="w-full rounded-none px-4 py-4 hover:bg-slate-50"
+                avatarClassName="h-9 w-9 overflow-hidden ring-slate-50"
+                chevronClassName="ml-auto"
+              />
+            </div>
+          </aside>
+        </div>
+      )}
+
+      <aside className="hidden h-screen w-[212px] shrink-0 flex-col border-r border-line bg-white/92 shadow-[10px_0_38px_rgba(30,58,138,0.035)] backdrop-blur-xl md:flex">
       {/* Logo */}
       <div className="flex items-center gap-2.5 px-5 pb-5 pt-6">
         <div className="brand-gradient flex h-10 w-10 items-center justify-center rounded-[12px] shadow-soft ring-4 ring-indigo-50">
@@ -70,13 +177,13 @@ export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
         ))}
       </nav>
 
-      {/* Asset card */}
-      <div className="mx-3 mt-6 overflow-hidden rounded-2xl border border-indigo-100/80 bg-gradient-to-b from-indigo-50 to-white p-4 shadow-card">
-        <div className="text-[13px] font-bold text-brand">知识资产沉淀中</div>
-        <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
-          每一次学习都会沉淀为可复用的知识资产
-        </p>
-        {user?.is_super_admin && (
+      {/* Asset card - 仅超级管理员可见 */}
+      {user?.is_super_admin && (
+        <div className="mx-3 mt-6 overflow-hidden rounded-2xl border border-indigo-100/80 bg-gradient-to-b from-indigo-50 to-white p-4 shadow-card">
+          <div className="text-[13px] font-bold text-brand">知识资产沉淀中</div>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
+            每一次学习都会沉淀为可复用的知识资产
+          </p>
           <a
             href="/knowledge-graph"
             className="mt-3 flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-indigo-100 bg-white/85 text-[12px] font-bold text-brand transition-colors hover:bg-[#f6f5ff]"
@@ -84,24 +191,24 @@ export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
             查看完整图谱
             <Icon name="chevron-right" className="h-3.5 w-3.5" />
           </a>
-        )}
-        <div className="mt-4 space-y-3">
-          <AssetStat label="资料总数" value={error ? "—" : sourceTotal !== null ? fmtNum(sourceTotal) : "··"} unit="份" />
-          <AssetStat label="知识节点总数" value={error ? "—" : summary ? fmtNum(summary.nodes) : "··"} unit="个" />
-          <AssetStat label="关系边总数" value={error ? "—" : summary ? fmtNum(summary.edges) : "··"} unit="条" />
-          <AssetStat label="诊断报告总数" value={error ? "—" : summary ? fmtNum(summary.reports) : "··"} unit="份" />
-          <AssetStat label="待审核任务" value={error ? "—" : summary ? fmtNum(summary.pending_reviews) : "··"} unit="条" />
-        </div>
-        <div className="mt-2 flex justify-center pb-1 pt-1">
-          <div className="isometric-blocks">
-            <span className="left-[16px] top-[70px] h-[22px] w-[104px] rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500" />
-            <span className="left-[34px] top-[52px] h-[28px] w-[34px] rounded-lg bg-gradient-to-br from-[#4c43df] to-[#7f6bff]" />
-            <span className="left-[73px] top-[34px] h-[48px] w-[34px] rounded-lg bg-gradient-to-br from-[#7d66ff] to-[#b49aff]" />
-            <span className="left-[88px] top-[58px] h-[25px] w-[18px] rounded-md bg-white/40" />
-            <span className="left-[19px] top-[83px] h-[12px] w-[76px] rounded-lg bg-gradient-to-r from-blue-500 to-violet-400 opacity-70" />
+          <div className="mt-4 space-y-3">
+            <AssetStat label="资料总数" value={error ? "—" : sourceTotal !== null ? fmtNum(sourceTotal) : "··"} unit="份" />
+            <AssetStat label="知识节点总数" value={error ? "—" : summary ? fmtNum(summary.nodes) : "··"} unit="个" />
+            <AssetStat label="关系边总数" value={error ? "—" : summary ? fmtNum(summary.edges) : "··"} unit="条" />
+            <AssetStat label="诊断报告总数" value={error ? "—" : summary ? fmtNum(summary.reports) : "··"} unit="份" />
+            <AssetStat label="待审核任务" value={error ? "—" : summary ? fmtNum(summary.pending_reviews) : "··"} unit="条" />
+          </div>
+          <div className="mt-2 flex justify-center pb-1 pt-1">
+            <div className="isometric-blocks">
+              <span className="left-[16px] top-[70px] h-[22px] w-[104px] rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500" />
+              <span className="left-[34px] top-[52px] h-[28px] w-[34px] rounded-lg bg-gradient-to-br from-[#4c43df] to-[#7f6bff]" />
+              <span className="left-[73px] top-[34px] h-[48px] w-[34px] rounded-lg bg-gradient-to-br from-[#7d66ff] to-[#b49aff]" />
+              <span className="left-[88px] top-[58px] h-[25px] w-[18px] rounded-md bg-white/40" />
+              <span className="left-[19px] top-[83px] h-[12px] w-[76px] rounded-lg bg-gradient-to-r from-blue-500 to-violet-400 opacity-70" />
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* User */}
       <div className="mt-auto border-t border-line">
@@ -120,8 +227,9 @@ export function Sidebar({ activeKey = "home" }: { activeKey?: string }) {
           chevronClassName="ml-auto"
         />
       </div>
+      </aside>
       <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
-    </aside>
+    </>
   );
 }
 

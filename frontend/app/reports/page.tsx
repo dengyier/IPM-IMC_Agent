@@ -8,7 +8,7 @@ export default function Page({
 }) {
   return (
     <div className="flex min-h-screen overflow-hidden bg-transparent">
-      <Sidebar activeKey="reports" />
+      <Sidebar activeKey="reports" showMobileMenu={false} />
       <ReportsPage initialReportId={searchParams?.reportId ?? null} />
     </div>
   );

@@ -16,7 +16,7 @@ class SystemSettings(Base):
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default="default")
 
     system_name: Mapped[str] = mapped_column(
-        String(255), default="IMC&IPM 商业决策智能体"
+        String(255), default="天机AI 商业决策智能体"
     )
     system_short_name: Mapped[str] = mapped_column(String(120), default="IMC&IPM")
     system_version: Mapped[str] = mapped_column(String(40), default="v2.3.1")

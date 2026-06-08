@@ -1,7 +1,7 @@
 [project]
 name = "imc-ipm-decision-agent"
 version = "0.1.0"
-description = "IMC&IPM 商业决策智能体后端：以港大 IMC&IPM 核心方法论为不可见思考内核的企业商业决策智能体 (MKE 算法)。"
+description = "天机AI 商业决策智能体后端：以港大 IMC&IPM 核心方法论为不可见思考内核的企业商业决策智能体 (MKE 算法)。"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.111.0",

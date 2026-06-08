@@ -142,7 +142,7 @@ def process_source(
     """解析+入库为长任务：立即返回 task_id，前端轮询 /api/tasks/{id}。"""
     _get_source(db, source_id)  # 校验存在性，不存在直接 404
 
-    def work(bg: Session):
+    def work(bg: Session, progress):
         source = bg.get(MethodologySource, source_id)
         if source is None:
             raise ValueError("来源不存在")
@@ -164,7 +164,7 @@ def build_kernel(
     """构建知识内核（节点+边）为长任务（实测可达数十分钟）。"""
     _get_source(db, source_id)
 
-    def work(bg: Session):
+    def work(bg: Session, progress):
         source = bg.get(MethodologySource, source_id)
         if source is None:
             raise ValueError("来源不存在")

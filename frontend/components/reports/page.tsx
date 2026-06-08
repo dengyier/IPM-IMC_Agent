@@ -150,7 +150,7 @@ export function ReportsPage({ initialReportId = null }: { initialReportId?: stri
         onRefresh={() => loadList(true)}
       />
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <section className="flex min-w-0 flex-1 flex-col overflow-y-auto px-8 pb-8 pt-5">
+        <section className="flex min-w-0 flex-1 flex-col overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+24px)] pt-4 md:px-8 md:pb-8 md:pt-5">
           <div className="grid min-h-0 flex-1 gap-5 xl:grid-cols-[336px_1fr]">
             <ReportList
               items={pageItems}
@@ -187,16 +187,16 @@ function ReportsHeader({
   onRefresh: () => void;
 }) {
   return (
-    <header className="flex items-center justify-between gap-6 px-8 pt-6">
-      <div>
-        <h1 className="text-[27px] font-black tracking-[-0.03em] text-ink">诊断报告中心</h1>
-        <p className="mt-1.5 text-[13px] font-medium text-slate-500">
+    <header className="flex flex-col gap-3 pl-16 pr-4 pt-4 md:flex-row md:items-center md:justify-between md:gap-6 md:px-8 md:pt-6">
+      <div className="min-w-0">
+        <h1 className="text-[22px] font-black tracking-[-0.03em] text-ink md:text-[27px]">诊断报告中心</h1>
+        <p className="mt-1.5 text-[12.5px] font-medium text-slate-500 md:text-[13px]">
           集中管理所有商业诊断报告，支持查看、重新生成与删除（共 {total} 份）
         </p>
       </div>
-      <div className="flex items-center gap-4">
-        <div className="flex h-10 w-[280px] items-center gap-2.5 rounded-xl border border-line bg-white px-4">
-          <Icon name="search" className="h-4 w-4 text-slate-400" />
+      <div className="flex items-center gap-2 md:gap-4">
+        <div className="flex h-10 min-w-0 flex-1 items-center gap-2.5 rounded-xl border border-line bg-white px-4 md:w-[280px] md:flex-none">
+          <Icon name="search" className="h-4 w-4 shrink-0 text-slate-400" />
           <input
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
@@ -206,10 +206,10 @@ function ReportsHeader({
         </div>
         <button
           onClick={onRefresh}
-          className="flex h-10 items-center gap-2 rounded-xl border border-line bg-white px-4 text-[13px] font-bold text-[#172452] hover:text-brand"
+          className="flex h-10 shrink-0 items-center gap-2 rounded-xl border border-line bg-white px-3 text-[13px] font-bold text-[#172452] hover:text-brand md:px-4"
         >
           <Icon name="refresh" className="h-4 w-4" />
-          刷新
+          <span className="hidden sm:inline">刷新</span>
         </button>
       </div>
     </header>
