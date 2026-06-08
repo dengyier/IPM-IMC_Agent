@@ -3,8 +3,8 @@ import { AuthGate, AuthProvider } from "@/components/auth-context";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "IMC&IPM 商业决策智能体",
-  description: "面向 IMC&IPM 课程知识资产的商业决策智能体工作台",
+  title: "天机AI商业决策智能体",
+  description: "基于港大 IMC&IPM 方法论的商业决策智能体工作台",
 };
 
 export default function RootLayout({

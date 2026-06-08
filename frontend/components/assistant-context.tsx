@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   assistantApi,
   type AssistantAttachment,
@@ -32,13 +32,14 @@ export type AssistantMessage = {
 type AssistantContextValue = {
   input: string;
   messages: AssistantMessage[];
-  conversations: AssistantConversationRecord[];
+  conversations: AssistantConversation[];
   activeConversationId: string | null;
   loading: boolean;
   historyLoading: boolean;
   setInput: (value: string) => void;
   sendQuestion: (question?: string, companyContext?: string, attachments?: AssistantAttachment[]) => Promise<void>;
   createConversation: () => Promise<void>;
+  ensureActiveConversation: () => Promise<string | null>;
   selectConversation: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
   depositAttachment: (fileId: string) => Promise<AssistantDepositFileResult>;
@@ -46,6 +47,12 @@ type AssistantContextValue = {
 };
 
 const AssistantContext = createContext<AssistantContextValue | null>(null);
+const ACTIVE_CONVERSATION_KEY = "imc_ipm_active_assistant_conversation";
+const DRAFT_CONVERSATION_PREFIX = "local-draft-";
+
+export type AssistantConversation = AssistantConversationRecord & {
+  isLocalDraft?: boolean;
+};
 
 const WELCOME_MESSAGE: AssistantMessage = {
   id: "welcome",
@@ -61,6 +68,26 @@ function titleFromQuestion(question: string): string {
 
 function isPlaceholderTitle(title?: string | null): boolean {
   return !title || ["新会话", "历史会话"].includes(title.trim());
+}
+
+function isLocalDraftConversation(conversation?: AssistantConversation | null): boolean {
+  return Boolean(conversation?.isLocalDraft || conversation?.id.startsWith(DRAFT_CONVERSATION_PREFIX));
+}
+
+function createLocalDraftConversation(): AssistantConversation {
+  const now = new Date().toISOString();
+  return {
+    id: `${DRAFT_CONVERSATION_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    title: "新会话",
+    message_count: 0,
+    created_at: now,
+    updated_at: now,
+    isLocalDraft: true,
+  };
+}
+
+function countConversationMessages(messages: AssistantMessage[]): number {
+  return messages.filter((message) => message.id !== WELCOME_MESSAGE.id).length;
 }
 
 function mapRecordToMessage(record: AssistantMessageRecord): AssistantMessage {
@@ -85,19 +112,86 @@ function mapRecordToMessage(record: AssistantMessageRecord): AssistantMessage {
 
 export function AssistantProvider({ children }: { children: React.ReactNode }) {
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loadingConversationId, setLoadingConversationId] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [messages, setMessages] = useState<AssistantMessage[]>([WELCOME_MESSAGE]);
-  const [conversations, setConversations] = useState<AssistantConversationRecord[]>([]);
+  const [messageCache, setMessageCache] = useState<Record<string, AssistantMessage[]>>({});
+  const [inputDrafts, setInputDrafts] = useState<Record<string, string>>({});
+  const [conversations, setConversations] = useState<AssistantConversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const activeConversationIdRef = useRef<string | null>(null);
+  const conversationsRef = useRef<AssistantConversation[]>([]);
+  const messageCacheRef = useRef<Record<string, AssistantMessage[]>>({});
+
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+  }, [activeConversationId]);
+
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
+
+  useEffect(() => {
+    messageCacheRef.current = messageCache;
+  }, [messageCache]);
+
+  const loading = loadingConversationId === activeConversationId;
+
+  const rememberInput = useCallback((value: string, conversationId?: string | null) => {
+    const key = conversationId ?? activeConversationIdRef.current;
+    if (!key) return;
+    setInputDrafts((prev) => ({ ...prev, [key]: value }));
+  }, []);
+
+  const setInputForActive = useCallback(
+    (value: string) => {
+      setInput(value);
+      rememberInput(value);
+    },
+    [rememberInput]
+  );
+
+  const setActiveConversation = useCallback((conversationId: string | null) => {
+    setActiveConversationId(conversationId);
+    activeConversationIdRef.current = conversationId;
+    if (typeof window === "undefined") return;
+    if (conversationId) {
+      window.localStorage.setItem(ACTIVE_CONVERSATION_KEY, conversationId);
+    } else {
+      window.localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
+    }
+  }, []);
 
   const loadMessages = useCallback(async (conversationId: string | null) => {
     setHistoryLoading(true);
     try {
-      const records = await assistantApi.messages(conversationId || undefined);
-      setMessages(records.length > 0 ? records.map(mapRecordToMessage) : [WELCOME_MESSAGE]);
+      if (!conversationId) {
+        setMessages([WELCOME_MESSAGE]);
+        return;
+      }
+
+      const cached = messageCacheRef.current[conversationId];
+      if (cached && activeConversationIdRef.current === conversationId) {
+        setMessages(cached);
+      }
+
+      const conversation = conversationsRef.current.find((row) => row.id === conversationId);
+      if (isLocalDraftConversation(conversation)) {
+        setMessages(cached || [WELCOME_MESSAGE]);
+        return;
+      }
+
+      const records = await assistantApi.messages(conversationId);
+      const nextMessages = records.length > 0 ? records.map(mapRecordToMessage) : [WELCOME_MESSAGE];
+      setMessageCache((prev) => ({ ...prev, [conversationId]: nextMessages }));
+      if (activeConversationIdRef.current === conversationId) {
+        setMessages(nextMessages);
+      }
     } catch {
-      setMessages([WELCOME_MESSAGE]);
+      if (conversationId && messageCacheRef.current[conversationId]) return;
+      if (activeConversationIdRef.current === conversationId) {
+        setMessages([WELCOME_MESSAGE]);
+      }
     } finally {
       setHistoryLoading(false);
     }
@@ -105,7 +199,13 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
 
   const refreshConversations = useCallback(async () => {
     const rows = await assistantApi.conversations();
-    setConversations(rows);
+    setConversations((prev) => {
+      const drafts = prev.filter((conversation) => isLocalDraftConversation(conversation));
+      const draftIds = new Set(drafts.map((conversation) => conversation.id));
+      const next = [...drafts, ...rows.filter((row) => !draftIds.has(row.id))];
+      conversationsRef.current = next;
+      return next;
+    });
     return rows;
   }, []);
 
@@ -116,25 +216,30 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       try {
         let rows = await assistantApi.conversations();
         if (cancelled) return;
-        // 首次进入：若没有任何会话，默认建一个，保证右侧列表始终有一条对话。
+        // 首次进入只创建本地草稿，等用户真正发送问题后再落库，避免历史里出现空会话。
         if (rows.length === 0) {
-          await assistantApi.createConversation("新会话").catch(() => undefined);
-          rows = await assistantApi.conversations();
-          if (cancelled) return;
+          const draft = createLocalDraftConversation();
+          const nextMessages = [WELCOME_MESSAGE];
+          setConversations([draft]);
+          conversationsRef.current = [draft];
+          setActiveConversation(draft.id);
+          setMessageCache({ [draft.id]: nextMessages });
+          setMessages(nextMessages);
+          return;
         }
         setConversations(rows);
+        conversationsRef.current = rows;
         const savedId =
           typeof window !== "undefined"
-            ? window.localStorage.getItem("imc_ipm_active_assistant_conversation")
+            ? window.localStorage.getItem(ACTIVE_CONVERSATION_KEY)
             : null;
-        const nextId = savedId && rows.some((row) => row.id === savedId) ? savedId : rows[0]?.id ?? "default";
-        setActiveConversationId(nextId);
-        if (nextId && typeof window !== "undefined") {
-          window.localStorage.setItem("imc_ipm_active_assistant_conversation", nextId);
-        }
-        const records = await assistantApi.messages(nextId);
+        const nextId = savedId && rows.some((row) => row.id === savedId) ? savedId : rows[0]?.id ?? null;
+        setActiveConversation(nextId);
+        const records = nextId ? await assistantApi.messages(nextId) : [];
         if (!cancelled) {
-          setMessages(records.length > 0 ? records.map(mapRecordToMessage) : [WELCOME_MESSAGE]);
+          const nextMessages = records.length > 0 ? records.map(mapRecordToMessage) : [WELCOME_MESSAGE];
+          setMessages(nextMessages);
+          if (nextId) setMessageCache((prev) => ({ ...prev, [nextId]: nextMessages }));
         }
       } catch {
         if (!cancelled) setMessages([WELCOME_MESSAGE]);
@@ -145,110 +250,293 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [setActiveConversation]);
+
+  const replaceDraftConversation = useCallback(
+    (draftId: string, realConversation: AssistantConversationRecord, title?: string) => {
+      const realTitle = title || realConversation.title;
+      setConversations((prev) => {
+        const next = prev.map((conversation) =>
+          conversation.id === draftId
+            ? {
+                ...realConversation,
+                title: isPlaceholderTitle(realConversation.title) ? realTitle : realConversation.title,
+                isLocalDraft: false,
+              }
+            : conversation
+        );
+        conversationsRef.current = next;
+        return next;
+      });
+      setInputDrafts((prev) => {
+        const next = { ...prev };
+        next[realConversation.id] = next[draftId] || "";
+        delete next[draftId];
+        return next;
+      });
+      setMessageCache((prev) => {
+        if (!prev[draftId]) return prev;
+        const next = { ...prev, [realConversation.id]: prev[draftId] };
+        delete next[draftId];
+        return next;
+      });
+      if (activeConversationIdRef.current === draftId) {
+        setActiveConversation(realConversation.id);
+      }
+    },
+    [setActiveConversation]
+  );
+
+  const ensureActiveConversation = useCallback(async () => {
+    const currentId = activeConversationIdRef.current;
+    const current = conversationsRef.current.find((conversation) => conversation.id === currentId);
+    if (current && !isLocalDraftConversation(current)) return current.id;
+
+    const conversation = await assistantApi.createConversation("新会话");
+    if (currentId && current && isLocalDraftConversation(current)) {
+      replaceDraftConversation(currentId, conversation);
+    } else {
+      setConversations((prev) => {
+        const next = [conversation, ...prev];
+        conversationsRef.current = next;
+        return next;
+      });
+      setActiveConversation(conversation.id);
+    }
+    return conversation.id;
+  }, [replaceDraftConversation, setActiveConversation]);
 
   const sendQuestion = useCallback(
     async (question?: string, companyContext?: string, attachments?: AssistantAttachment[]) => {
       const text = (question ?? input).trim();
-      if (!text || loading) return;
-      const conversationId = activeConversationId;
+      if (!text || loadingConversationId) return;
+      const now = new Date().toISOString();
+      const nextTitle = titleFromQuestion(text);
+      let conversationId = activeConversationIdRef.current;
+      let conversation = conversationsRef.current.find((row) => row.id === conversationId);
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `u-${Date.now()}`,
-          role: "user",
-          content: text,
-          attachments,
-        },
-      ]);
+      if (!conversationId || !conversation) {
+        const draft = createLocalDraftConversation();
+        conversationId = draft.id;
+        conversation = draft;
+        const nextConversations = [draft, ...conversationsRef.current];
+        conversationsRef.current = nextConversations;
+        setConversations(nextConversations);
+        setActiveConversation(draft.id);
+      }
+
+      const apiConversationId = isLocalDraftConversation(conversation) ? null : conversationId;
+      const optimisticUserMessage: AssistantMessage = {
+        id: `u-${Date.now()}`,
+        role: "user",
+        content: text,
+        attachments,
+      };
+      const baseMessages = messageCacheRef.current[conversationId] || messages;
+      const optimisticMessages = [...baseMessages, optimisticUserMessage];
+
+      setConversations((prev) => {
+        const next = prev.map((row) =>
+          row.id === conversationId
+            ? {
+                ...row,
+                title: isPlaceholderTitle(row.title) ? nextTitle : row.title,
+                message_count: Math.max(row.message_count, countConversationMessages(optimisticMessages)),
+                updated_at: now,
+              }
+            : row
+        );
+        conversationsRef.current = next;
+        return next;
+      });
+      setMessageCache((prev) => ({ ...prev, [conversationId]: optimisticMessages }));
+      if (activeConversationIdRef.current === conversationId) {
+        setMessages(optimisticMessages);
+      }
       setInput("");
-      setLoading(true);
+      rememberInput("", conversationId);
+      setLoadingConversationId(conversationId);
       try {
-        const result = await assistantApi.ask(text, companyContext, conversationId, attachments);
+        const result = await assistantApi.ask(text, companyContext, apiConversationId, attachments);
         const nextConversationId = result.conversation_id || conversationId;
-        if (result.conversation_id && result.conversation_id !== activeConversationId) {
-          setActiveConversationId(result.conversation_id);
-          window.localStorage.setItem("imc_ipm_active_assistant_conversation", result.conversation_id);
+        const assistantMessage: AssistantMessage = {
+          id: result.assistant_message_id || `a-${Date.now()}`,
+          role: "assistant",
+          content: result.answer,
+          usedLlm: result.used_llm,
+          nodeRefs: result.node_refs,
+          suggestedQuestions: result.suggested_questions,
+          action:
+            result.action_label && result.action_href
+              ? { label: result.action_label, href: result.action_href }
+              : undefined,
+        };
+        const cachedMessages = messageCacheRef.current[conversationId] || optimisticMessages;
+        const nextMessages = [...cachedMessages, assistantMessage];
+
+        if (nextConversationId !== conversationId) {
+          setConversations((prev) => {
+            let replaced = false;
+            const next = prev.map((row) => {
+              if (row.id !== conversationId) return row;
+              replaced = true;
+              return {
+                id: nextConversationId,
+                title: nextTitle,
+                message_count: countConversationMessages(nextMessages),
+                created_at: row.created_at || now,
+                updated_at: new Date().toISOString(),
+                isLocalDraft: false,
+              };
+            });
+            const finalRows = replaced
+              ? next
+              : [
+                  {
+                    id: nextConversationId,
+                    title: nextTitle,
+                    message_count: countConversationMessages(nextMessages),
+                    created_at: now,
+                    updated_at: new Date().toISOString(),
+                    isLocalDraft: false,
+                  },
+                  ...next,
+                ];
+            conversationsRef.current = finalRows;
+            return finalRows;
+          });
+          setMessageCache((prev) => {
+            const next = { ...prev, [nextConversationId]: nextMessages };
+            delete next[conversationId];
+            return next;
+          });
+          setInputDrafts((prev) => {
+            const next = { ...prev, [nextConversationId]: "" };
+            delete next[conversationId];
+            return next;
+          });
+          if (activeConversationIdRef.current === conversationId) {
+            setActiveConversation(nextConversationId);
+            setMessages(nextMessages);
+          }
+        } else {
+          setMessageCache((prev) => ({ ...prev, [nextConversationId]: nextMessages }));
+          if (activeConversationIdRef.current === nextConversationId) {
+            setMessages(nextMessages);
+          }
         }
         if (nextConversationId) {
-          const nextTitle = titleFromQuestion(text);
-          setConversations((prev) =>
-            prev.map((conversation) =>
-              conversation.id === nextConversationId && isPlaceholderTitle(conversation.title)
-                ? { ...conversation, title: nextTitle }
+          setConversations((prev) => {
+            const next = prev.map((conversation) =>
+              conversation.id === nextConversationId
+                ? {
+                    ...conversation,
+                    title: isPlaceholderTitle(conversation.title) ? nextTitle : conversation.title,
+                    message_count: Math.max(conversation.message_count, countConversationMessages(nextMessages)),
+                    updated_at: new Date().toISOString(),
+                  }
                 : conversation
-            )
-          );
+            );
+            conversationsRef.current = next;
+            return next;
+          });
         }
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: result.assistant_message_id || `a-${Date.now()}`,
-            role: "assistant",
-            content: result.answer,
-            usedLlm: result.used_llm,
-            nodeRefs: result.node_refs,
-            suggestedQuestions: result.suggested_questions,
-            action:
-              result.action_label && result.action_href
-                ? { label: result.action_label, href: result.action_href }
-                : undefined,
-          },
-        ]);
         refreshConversations().catch(() => undefined);
       } catch (error) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `a-${Date.now()}`,
-            role: "assistant",
-            content:
-              error instanceof Error
-                ? `助手服务暂时不可用：${error.message}`
-                : "助手服务暂时不可用，请稍后再试。",
-          },
-        ]);
+        const errorMessage: AssistantMessage = {
+          id: `a-${Date.now()}`,
+          role: "assistant",
+          content:
+            error instanceof Error
+              ? `助手服务暂时不可用：${error.message}`
+              : "助手服务暂时不可用，请稍后再试。",
+        };
+        const nextMessages = [...(messageCacheRef.current[conversationId] || optimisticMessages), errorMessage];
+        setMessageCache((prev) => ({ ...prev, [conversationId]: nextMessages }));
+        if (activeConversationIdRef.current === conversationId) {
+          setMessages(nextMessages);
+        }
       } finally {
-        setLoading(false);
+        setLoadingConversationId((current) => (current === conversationId ? null : current));
       }
     },
-    [activeConversationId, input, loading, refreshConversations]
+    [input, loadingConversationId, messages, refreshConversations, rememberInput, setActiveConversation]
   );
 
   const createConversation = useCallback(async () => {
-    const conversation = await assistantApi.createConversation("新会话");
-    setConversations((prev) => [conversation, ...prev]);
-    setActiveConversationId(conversation.id);
-    window.localStorage.setItem("imc_ipm_active_assistant_conversation", conversation.id);
+    const conversation = createLocalDraftConversation();
+    setConversations((prev) => {
+      const next = [conversation, ...prev];
+      conversationsRef.current = next;
+      return next;
+    });
+    setActiveConversation(conversation.id);
+    setMessageCache((prev) => ({ ...prev, [conversation.id]: [WELCOME_MESSAGE] }));
     setMessages([WELCOME_MESSAGE]);
     setInput("");
-  }, []);
+    rememberInput("", conversation.id);
+  }, [rememberInput, setActiveConversation]);
 
   const selectConversation = useCallback(
     async (id: string) => {
-      setActiveConversationId(id);
-      window.localStorage.setItem("imc_ipm_active_assistant_conversation", id);
+      setActiveConversation(id);
+      setInput(inputDrafts[id] || "");
+      const conversation = conversationsRef.current.find((row) => row.id === id);
+      const cached = messageCacheRef.current[id];
+      if (cached) {
+        setMessages(cached);
+      }
+      if (isLocalDraftConversation(conversation)) {
+        setMessages(cached || [WELCOME_MESSAGE]);
+        setHistoryLoading(false);
+        return;
+      }
       await loadMessages(id);
     },
-    [loadMessages]
+    [inputDrafts, loadMessages, setActiveConversation]
   );
 
   const deleteConversation = useCallback(
     async (id: string) => {
+      const conversation = conversationsRef.current.find((row) => row.id === id);
+      if (isLocalDraftConversation(conversation)) {
+        const remaining = conversationsRef.current.filter((row) => row.id !== id);
+        conversationsRef.current = remaining;
+        setConversations(remaining);
+        setMessageCache((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        setInputDrafts((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        const nextId = activeConversationIdRef.current === id ? remaining[0]?.id ?? null : activeConversationIdRef.current;
+        setActiveConversation(nextId);
+        if (activeConversationIdRef.current === nextId && nextId) {
+          await selectConversation(nextId);
+        } else if (!nextId) {
+          setMessages([WELCOME_MESSAGE]);
+          setInput("");
+        }
+        return;
+      }
+
       await assistantApi.deleteConversation(id);
       const rows = await refreshConversations();
-      const nextId = rows[0]?.id ?? null;
-      setActiveConversationId(nextId);
+      const localDrafts = conversationsRef.current.filter((row) => row.id !== id && isLocalDraftConversation(row));
+      const nextId = [...localDrafts, ...rows][0]?.id ?? null;
+      setActiveConversation(nextId);
       if (nextId) {
-        window.localStorage.setItem("imc_ipm_active_assistant_conversation", nextId);
         await loadMessages(nextId);
       } else {
-        window.localStorage.removeItem("imc_ipm_active_assistant_conversation");
         setMessages([WELCOME_MESSAGE]);
+        setInput("");
       }
     },
-    [loadMessages, refreshConversations]
+    [loadMessages, refreshConversations, selectConversation, setActiveConversation]
   );
 
   const depositAttachment = useCallback(
@@ -312,9 +600,10 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       activeConversationId,
       loading,
       historyLoading,
-      setInput,
+      setInput: setInputForActive,
       sendQuestion,
       createConversation,
+      ensureActiveConversation,
       selectConversation,
       deleteConversation,
       depositAttachment,
@@ -329,6 +618,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       historyLoading,
       sendQuestion,
       createConversation,
+      ensureActiveConversation,
       selectConversation,
       deleteConversation,
       depositAttachment,

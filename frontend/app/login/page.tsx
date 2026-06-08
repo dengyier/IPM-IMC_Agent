@@ -74,22 +74,22 @@ export default function LoginPage() {
                 <Icon name="boxes" className="h-6 w-6 text-white" />
               </div>
               <div>
-                <div className="text-[20px] font-black text-ink">IMC&IPM</div>
+                <div className="text-[20px] font-black text-ink">天机AI</div>
                 <div className="text-[13px] font-semibold text-slate-500">商业决策智能体</div>
               </div>
             </div>
 
             <div className="mt-24 max-w-[420px]">
               <h1 className="text-[34px] font-black leading-tight text-ink">
-                用港大 IMC&IPM 方法论，连接知识资产与企业决策
+                天机AI商业决策智能体，连接知识资产与企业决策
               </h1>
               <p className="mt-5 text-[15px] leading-8 text-slate-500">
-                登录后可进入工作台，进行知识检索、商业画布诊断、同学笔记进化和诊断报告管理。
+                基于港大 IMC&IPM 核心方法论，沉淀课程知识、企业案例与对话经验，帮助你完成知识检索、商业诊断和决策报告生成。
               </p>
             </div>
 
             <div className="mt-16 grid max-w-[430px] grid-cols-2 gap-3">
-              {["核心知识节点", "DeepSeek 推理", "商业画布诊断", "报告沉淀复用"].map((item) => (
+              {["港大 IMC&IPM 方法论", "DeepSeek V4 推理", "商业画布诊断", "报告沉淀复用"].map((item) => (
                 <div key={item} className="rounded-2xl border border-white/80 bg-white/76 px-4 py-3 text-[13px] font-bold text-[#26345f] shadow-[0_12px_28px_rgba(30,58,138,0.06)]">
                   {item}
                 </div>
@@ -102,7 +102,7 @@ export default function LoginPage() {
           <div>
             <div className="text-[28px] font-black text-ink">手机号验证码登录</div>
             <p className="mt-3 text-[14px] leading-7 text-slate-500">
-              请输入管理员手机号，系统会发送一次性验证码用于登录。
+              输入手机号获取一次性验证码，登录天机AI工作台。
             </p>
           </div>
 
