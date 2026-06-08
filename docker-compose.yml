@@ -1,11 +1,5 @@
 # ============================================================================
-# 天机AI 商业决策智能体 —— 全栈一键部署编排
-#
-#   cp .env.example .env   # 填写密钥与公网地址
-#   docker compose up -d --build
-#
-# 数据持久化在命名卷 postgres_data / qdrant_data / upload_data，
-# 更新代码（git pull + 重新 build）不会丢失知识资产。详见 docs/香港服务器部署文档.md。
+# IMC&IPM 商业决策智能体 —— 全栈一键部署编排 (直连 + SQLite 宿主机持久化版)
 # ============================================================================
 
 services:
@@ -23,17 +17,12 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-    # 仅本机调试时再放开端口；生产保持内网即可
-    # ports:
-    #   - "127.0.0.1:5432:5432"
 
   qdrant:
-    image: qdrant/qdrant:latest   # 可固定为 qdrant/qdrant:v1.18.2 以保证可复现
+    image: qdrant/qdrant:latest
     restart: unless-stopped
     volumes:
       - qdrant_data:/qdrant/storage
-    # ports:
-    #   - "127.0.0.1:6333:6333"
 
   api:
     build:
@@ -47,45 +36,33 @@ services:
     env_file:
       - .env
     environment:
-      # 以下三项由编排强制指向容器内服务，覆盖 .env 中的同名值
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-imc}:${POSTGRES_PASSWORD:-imc_password}@postgres:5432/${POSTGRES_DB:-imc_ipm}
+      # 强制指定为容器内 data 目录下的 SQLite 数据库
+      DATABASE_URL: sqlite:///./data/imc_ipm.db
       QDRANT_URL: http://qdrant:6333
       STORAGE_DIR: /data/uploads
     volumes:
       - upload_data:/data/uploads
+      # 【核心修改】将宿主机目录挂载到容器内的 data 目录
+      # 注意：如果 后端 Dockerfile 中的 WORKDIR 不是 /app（例如是 /code 或 /workspace），请将下方 /app/data 替换为对应的 /code/data
+      - /opt/imc-migration:/app/data
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:18005/').status==200 else sys.exit(1)\""]
       interval: 10s
       timeout: 5s
       retries: 12
-    # ports:
-    #   - "127.0.0.1:18005:18005"
+    ports:
+      - "18005:18005"
 
   frontend:
     build:
       context: ./frontend
       args:
-        # 浏览器访问后端的根地址（不带 /api），构建期注入；改地址需重新 build
-        NEXT_PUBLIC_API_BASE: ${PUBLIC_BASE_URL:-http://localhost:18005}
+        NEXT_PUBLIC_API_BASE: ${PUBLIC_BASE_URL:-http://8.217.223.92:18005}
     restart: unless-stopped
     depends_on:
       - api
-    # ports:
-    #   - "127.0.0.1:13005:13005"
-
-  nginx:
-    image: nginx:alpine
-    restart: unless-stopped
-    depends_on:
-      - api
-      - frontend
     ports:
-      - "80:80"
-      # 配好证书后启用 443，并在 deploy/nginx.conf 增加 ssl server 块
-      # - "443:443"
-    volumes:
-      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      # - ./deploy/certs:/etc/nginx/certs:ro
+      - "13005:13005"
 
 volumes:
   postgres_data:

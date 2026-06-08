@@ -189,7 +189,17 @@ function ReportsHeader({
   return (
     <header className="flex flex-col gap-3 pl-16 pr-4 pt-4 md:flex-row md:items-center md:justify-between md:gap-6 md:px-8 md:pt-6">
       <div className="min-w-0">
-        <h1 className="text-[22px] font-black tracking-[-0.03em] text-ink md:text-[27px]">诊断报告中心</h1>
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => window.history.back()}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-line bg-white text-[#172452] transition-colors hover:text-brand"
+            title="返回"
+          >
+            <Icon name="chevron-left" className="h-5 w-5" />
+          </button>
+          <h1 className="text-[22px] font-black tracking-[-0.03em] text-ink md:text-[27px]">诊断报告中心</h1>
+        </div>
         <p className="mt-1.5 text-[12.5px] font-medium text-slate-500 md:text-[13px]">
           集中管理所有商业诊断报告，支持查看、重新生成与删除（共 {total} 份）
         </p>

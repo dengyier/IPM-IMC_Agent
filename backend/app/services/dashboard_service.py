@@ -47,6 +47,21 @@ class DashboardService:
             query = query.filter(model.tenant_id == self.tenant_id)
         return query.scalar() or 0
 
+    def _expansion_source_count(self, *, exclude_assistant_deposits: bool = False) -> int:
+        """扩展来源计数。
+
+        侧边栏/看板里的「资料总数」应统计真实资料来源，不应把助手会话/附件沉淀出的
+        practice_feedback 记录一并算进去，否则会出现“资料库几乎为空但资料数不为 0”的误导。
+        """
+        query = self.db.query(func.count(ExpansionSource.id))
+        if self.tenant_id is not None:
+            query = query.filter(ExpansionSource.tenant_id == self.tenant_id)
+        if exclude_assistant_deposits:
+            query = query.filter(
+                ExpansionSource.meta["deposited_from"].as_string().is_(None)
+            )
+        return query.scalar() or 0
+
     def summary(
         self, core_store: VectorStore, llm: LLMService, embedding_provider: str
     ) -> DashboardSummary:
@@ -65,7 +80,9 @@ class DashboardService:
         )
         return DashboardSummary(
             methodology_sources=self._count(MethodologySource),
-            expansion_sources=self._tenant_count(ExpansionSource),
+            expansion_sources=self._expansion_source_count(
+                exclude_assistant_deposits=True
+            ),
             chunks=self._count(MethodologyChunk),
             nodes=self._count(MethodologyNode),
             edges=self._count(MethodologyEdge),
@@ -88,6 +105,9 @@ class DashboardService:
         )
         expansion_q = self.db.query(func.count(ExpansionSource.id)).filter(
             ExpansionSource.status == "uploaded"
+        )
+        expansion_q = expansion_q.filter(
+            ExpansionSource.meta["deposited_from"].as_string().is_(None)
         )
         reports_q = self.db.query(func.count(DiagnosisReport.id)).filter(
             DiagnosisReport.status != "checked"
