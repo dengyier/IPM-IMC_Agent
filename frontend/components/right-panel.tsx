@@ -37,9 +37,15 @@ type PendingAttachment = {
 };
 
 export function HomeWorkspace() {
-  const [convOpen, setConvOpen] = useState(true);
+  const [convOpen, setConvOpen] = useState(false);
+
+  useEffect(() => {
+    const desktopQuery = window.matchMedia("(min-width: 768px)");
+    setConvOpen(desktopQuery.matches);
+  }, []);
+
   return (
-    <div className="flex h-screen min-w-0 flex-1 overflow-hidden">
+    <div className="relative flex h-dvh min-w-0 flex-1 overflow-hidden md:h-screen">
       <ChatMain convOpen={convOpen} onToggleConv={() => setConvOpen((v) => !v)} />
       {convOpen && <ConversationPanel onCollapse={() => setConvOpen(false)} />}
     </div>
@@ -171,9 +177,9 @@ function ChatMain({
     <>
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* 顶部细条 */}
-        <div className="flex h-14 shrink-0 items-center justify-end gap-2 px-8">
+        <div className="flex h-14 shrink-0 items-center justify-end gap-1.5 pl-16 pr-3 md:gap-2 md:px-8">
           {activeConversation && hasConversation && (
-            <span className="mr-auto inline-flex max-w-[50%] items-center gap-1.5 rounded-lg bg-[#f7f5ff] px-2.5 py-1 text-[11px] font-bold text-brand">
+            <span className="mr-auto inline-flex max-w-[42vw] items-center gap-1.5 rounded-lg bg-[#f7f5ff] px-2.5 py-1 text-[11px] font-bold text-brand md:max-w-[50%]">
               <Icon name="history" className="h-3.5 w-3.5" />
               <span className="truncate">当前会话：{activeConversationTitle}</span>
             </span>
@@ -181,11 +187,11 @@ function ChatMain({
           <PendingTaskBell />
           <button
             onClick={() => setFocusOpen(true)}
-            className="flex h-10 items-center gap-2 rounded-full px-3 text-[13px] font-bold text-[#172452] transition-colors hover:bg-white hover:text-brand"
+            className="flex h-10 items-center gap-2 rounded-full px-2.5 text-[13px] font-bold text-[#172452] transition-colors hover:bg-white hover:text-brand md:px-3"
             title="打开专注对话"
           >
             <Icon name="panel" className="h-[18px] w-[18px]" />
-            专注
+            <span className="hidden sm:inline">专注</span>
           </button>
           <button className="flex h-10 w-10 items-center justify-center rounded-full text-[#172452] transition-colors hover:bg-white hover:text-brand">
             <Icon name="help-circle" className="h-[19px] w-[19px]" />
@@ -193,18 +199,18 @@ function ChatMain({
           <button
             onClick={onToggleConv}
             className={cn(
-              "flex h-10 items-center gap-2 rounded-full px-3 text-[13px] font-bold transition-colors hover:bg-white hover:text-brand",
+              "flex h-10 items-center gap-2 rounded-full px-2.5 text-[13px] font-bold transition-colors hover:bg-white hover:text-brand md:px-3",
               convOpen ? "text-brand" : "text-[#172452]"
             )}
             title={convOpen ? "收起会话列表" : "展开会话列表"}
           >
             <Icon name="history" className="h-[18px] w-[18px]" />
-            会话
+            <span className="hidden sm:inline">会话</span>
           </button>
         </div>
 
         {/* 中部：Hero（空状态）或消息流 */}
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-8">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 md:px-8">
           {!hasConversation ? (
             <HomeHero
               displayName={user?.display_name || "用户"}
@@ -212,7 +218,7 @@ function ChatMain({
               onDraft={fillDraft}
             />
           ) : (
-            <div className="mx-auto w-full max-w-[900px] space-y-4 py-6">
+            <div className="mx-auto w-full max-w-[900px] space-y-3 py-4 md:space-y-4 md:py-6">
               {historyLoading && (
                 <div className="rounded-2xl border border-line bg-white px-4 py-3.5 text-[13px] text-slate-500 shadow-[0_10px_24px_rgba(30,58,138,0.05)]">
                   正在恢复历史会话...
@@ -241,7 +247,7 @@ function ChatMain({
         </div>
 
         {/* 底部输入条 */}
-        <div className="shrink-0 px-8 pb-6 pt-2">
+        <div className="shrink-0 px-4 pb-[calc(env(safe-area-inset-bottom)+14px)] pt-2 md:px-8 md:pb-6">
           <input
             ref={fileInputRef}
             type="file"
@@ -265,7 +271,7 @@ function ChatMain({
                 {attachment && !attaching && (
                   <span className="inline-flex items-center gap-2 rounded-lg border border-line bg-white px-3 py-1.5 text-[12px] font-semibold text-[#172452]">
                     <Icon name="file-text" className="h-3.5 w-3.5 text-brand" />
-                    <span className="max-w-[260px] truncate">{attachment.name}</span>
+                    <span className="max-w-[calc(100vw-170px)] truncate md:max-w-[260px]">{attachment.name}</span>
                     <span className="text-[11px] text-emerald-600">
                       已解析全文 · {attachment.chunkCount} 片段
                     </span>
@@ -289,7 +295,7 @@ function ChatMain({
                 event.preventDefault();
                 if (canSend) submit();
               }}
-              className="flex items-end gap-2 rounded-[24px] border border-line bg-white py-3 pl-3 pr-3 shadow-[0_18px_50px_rgba(15,23,42,0.10)] transition-colors focus-within:border-brand/50"
+              className="flex items-end gap-2 rounded-[22px] border border-line bg-white py-2.5 pl-2.5 pr-2.5 shadow-[0_18px_50px_rgba(15,23,42,0.10)] transition-colors focus-within:border-brand/50 md:rounded-[24px] md:py-3 md:pl-3 md:pr-3"
             >
               <button
                 type="button"
@@ -306,7 +312,7 @@ function ChatMain({
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={handleComposerKeyDown}
                 rows={1}
-                className="block max-h-32 min-h-[44px] flex-1 resize-none bg-transparent py-2 text-[15px] leading-6 text-ink outline-none placeholder:text-slate-400"
+                className="block max-h-32 min-h-[44px] flex-1 resize-none bg-transparent py-2 text-[16px] leading-6 text-ink outline-none placeholder:text-slate-400 md:text-[15px]"
                 placeholder={attachment ? "针对已上传文件提问，尽管问…" : "输入企业诉求，尽管问…"}
               />
               <button
@@ -339,14 +345,14 @@ function HomeHero({
   onDraft: (question: string) => void;
 }) {
   return (
-    <div className="mx-auto flex min-h-full max-w-[760px] flex-col items-center justify-center py-10 text-center">
+    <div className="mx-auto flex min-h-full max-w-[760px] flex-col items-center justify-center py-20 text-center md:py-10">
       <div className="brand-gradient flex h-14 w-14 items-center justify-center rounded-2xl shadow-soft ring-8 ring-indigo-50/60">
         <Icon name="boxes" className="h-7 w-7 text-white" />
       </div>
-      <h1 className="mt-5 text-[30px] font-black tracking-[-0.03em] text-ink">
+      <h1 className="mt-5 text-[26px] font-black text-ink md:text-[30px]">
         你好，{displayName}
       </h1>
-      <p className="mt-3 max-w-[560px] text-[14px] leading-7 text-slate-500">
+      <p className="mt-3 max-w-[560px] text-[13px] leading-7 text-slate-500 md:text-[14px]">
         输入企业诉求，我会结合 IMC&IPM 核心方法论、知识节点与已沉淀案例，帮你形成可执行的商业判断。
       </p>
       <div className="mt-8 grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
@@ -504,10 +510,10 @@ function MessageBubble({
     <div className="w-full">
       <div
         className={cn(
-          "rounded-2xl px-4 py-3.5 text-[13px] leading-6",
+          "rounded-2xl px-4 py-3.5 text-[14px] leading-7 md:text-[13px] md:leading-6",
           message.role === "user"
-            ? "ml-auto max-w-[680px] bg-brand text-white shadow-[0_12px_28px_rgba(91,75,255,0.18)]"
-            : "max-w-[820px] border border-line bg-white text-slate-650 shadow-[0_10px_24px_rgba(30,58,138,0.05)]"
+            ? "ml-auto max-w-[88%] bg-brand text-white shadow-[0_12px_28px_rgba(91,75,255,0.18)] md:max-w-[680px]"
+            : "max-w-full border border-line bg-white text-slate-650 shadow-[0_10px_24px_rgba(30,58,138,0.05)] md:max-w-[820px]"
         )}
       >
         <div className="whitespace-pre-line">{message.content}</div>
@@ -553,7 +559,7 @@ function MessageBubble({
                     key={question}
                     disabled={loading}
                     onClick={() => onDraft(question)}
-                    className="w-fit max-w-full rounded-lg bg-[#f7f5ff] px-3 py-2 text-left text-[12.5px] font-semibold leading-5 text-brand transition-colors hover:bg-[#eeeaff] disabled:cursor-not-allowed disabled:opacity-60"
+                    className="w-full max-w-full rounded-lg bg-[#f7f5ff] px-3 py-2 text-left text-[12.5px] font-semibold leading-5 text-brand transition-colors hover:bg-[#eeeaff] disabled:cursor-not-allowed disabled:opacity-60 sm:w-fit"
                   >
                     {question}
                   </button>
@@ -630,50 +636,68 @@ function ConversationPanel({ onCollapse }: { onCollapse: () => void }) {
     deleteConversation,
   } = useAssistant();
 
+  function handleSelectConversation(conversationId: string) {
+    selectConversation(conversationId)
+      .then(() => {
+        if (window.matchMedia("(max-width: 767px)").matches) {
+          onCollapse();
+        }
+      })
+      .catch(() => undefined);
+  }
+
   return (
-    <aside className="flex h-screen w-[300px] shrink-0 flex-col border-l border-line bg-white/60 backdrop-blur-xl">
-      <div className="flex h-14 shrink-0 items-center justify-between px-4">
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={onCollapse}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white hover:text-brand"
-            title="收起会话列表"
-          >
-            <Icon name="chevron-right" className="h-4 w-4" />
-          </button>
-          <div className="text-[15px] font-black text-ink">对话</div>
-        </div>
-        <button
-          onClick={() => createConversation().catch(() => undefined)}
-          className="flex h-9 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-[12px] font-bold text-slate-600 transition-colors hover:text-brand"
-          title="开启新会话"
-        >
-          <Icon name="plus" className="h-3.5 w-3.5" />
-          新对话
-        </button>
-      </div>
-      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-4 pt-1">
-        {conversations.length === 0 && (
-          <div className="px-2 py-8 text-center text-[12.5px] leading-5 text-slate-400">
-            暂无会话，开始提问即可创建。
+    <>
+      <button
+        type="button"
+        aria-label="关闭会话列表"
+        onClick={onCollapse}
+        className="fixed inset-0 z-40 bg-slate-950/25 md:hidden"
+      />
+      <aside className="fixed inset-y-0 right-0 z-50 flex w-[86vw] max-w-[330px] shrink-0 flex-col border-l border-line bg-white/95 shadow-[-18px_0_56px_rgba(15,23,42,0.18)] backdrop-blur-xl md:static md:z-auto md:h-screen md:w-[300px] md:max-w-none md:bg-white/60 md:shadow-none">
+        <div className="flex h-14 shrink-0 items-center justify-between px-4">
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={onCollapse}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white hover:text-brand"
+              title="收起会话列表"
+            >
+              <Icon name="chevron-right" className="h-4 w-4" />
+            </button>
+            <div className="text-[15px] font-black text-ink">对话</div>
           </div>
-        )}
-        {conversations.map((conversation) => (
-          <ConversationListItem
-            key={conversation.id}
-            conversation={conversation}
-            active={conversation.id === activeConversationId}
-            displayTitle={
-              conversation.id === activeConversationId && isPlaceholderTitle(conversation.title)
-                ? titleFromActiveMessages(messages) || conversation.title
-                : conversation.title
-            }
-            onSelect={() => selectConversation(conversation.id)}
-            onDelete={() => deleteConversation(conversation.id)}
-          />
-        ))}
-      </div>
-    </aside>
+          <button
+            onClick={() => createConversation().catch(() => undefined)}
+            className="flex h-9 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-[12px] font-bold text-slate-600 transition-colors hover:text-brand"
+            title="开启新会话"
+          >
+            <Icon name="plus" className="h-3.5 w-3.5" />
+            新对话
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-4 pt-1">
+          {conversations.length === 0 && (
+            <div className="px-2 py-8 text-center text-[12.5px] leading-5 text-slate-400">
+              暂无会话，开始提问即可创建。
+            </div>
+          )}
+          {conversations.map((conversation) => (
+            <ConversationListItem
+              key={conversation.id}
+              conversation={conversation}
+              active={conversation.id === activeConversationId}
+              displayTitle={
+                conversation.id === activeConversationId && isPlaceholderTitle(conversation.title)
+                  ? titleFromActiveMessages(messages) || conversation.title
+                  : conversation.title
+              }
+              onSelect={() => handleSelectConversation(conversation.id)}
+              onDelete={() => deleteConversation(conversation.id)}
+            />
+          ))}
+        </div>
+      </aside>
+    </>
   );
 }
 
@@ -1076,10 +1100,10 @@ function ConversationListItem({
   conversation: ReturnType<typeof useAssistant>["conversations"][number];
   active: boolean;
   displayTitle?: string;
-  onSelect: () => Promise<void>;
+  onSelect: () => Promise<void> | void;
   onDelete: () => Promise<void>;
 }) {
-  const handleSelect = () => onSelect().catch(() => undefined);
+  const handleSelect = () => Promise.resolve(onSelect()).catch(() => undefined);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Enter" && event.key !== " ") return;
@@ -1115,7 +1139,7 @@ function ConversationListItem({
       <button
         type="button"
         onClick={handleDelete}
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-300 opacity-0 transition-opacity hover:bg-rose-50 hover:text-rose-500 group-hover:opacity-100"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-300 opacity-100 transition-opacity hover:bg-rose-50 hover:text-rose-500 md:opacity-0 md:group-hover:opacity-100"
         title="删除会话"
       >
         <Icon name="trash" className="h-3.5 w-3.5" />
