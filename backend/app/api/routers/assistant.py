@@ -516,7 +516,6 @@ def list_conversations(
     user: AuthUser = Depends(get_current_user),
 ) -> list[AssistantConversationOut]:
     tid = tenant_scope(user)
-    _ensure_default_conversation(db, tid)
     msg_q = db.query(AssistantMessage.conversation_id, func.count(AssistantMessage.id))
     if tid is not None:
         msg_q = msg_q.filter(AssistantMessage.tenant_id == tid)
@@ -527,6 +526,11 @@ def list_conversations(
     if tid is not None:
         conv_q = conv_q.filter(AssistantConversation.tenant_id == tid)
     rows = conv_q.order_by(AssistantConversation.updated_at.desc()).all()
+    rows = [
+        row
+        for row in rows
+        if not (row.id.startswith("default") and int(counts.get(row.id, 0)) == 0)
+    ]
     for row in rows:
         _sync_placeholder_title(db, row)
     db.commit()

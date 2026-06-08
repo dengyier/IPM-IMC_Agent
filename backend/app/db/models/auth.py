@@ -13,7 +13,7 @@ class AuthUser(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     phone: Mapped[str] = mapped_column(String(32), unique=True, index=True, nullable=False)
-    display_name: Mapped[str] = mapped_column(String(80), default="张晓明", nullable=False)
+    display_name: Mapped[str] = mapped_column(String(80), default="天机用户", nullable=False)
     # 平台级角色：super_admin（超级管理员）/ member（普通用户）
     role: Mapped[str] = mapped_column(String(40), default="member", nullable=False)
     # 所属租户（super_admin 为空）

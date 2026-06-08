@@ -41,6 +41,13 @@ REVIEWER_USER_TYPES = {USER_TYPE_ENTERPRISE_MANAGER, USER_TYPE_INDIVIDUAL}
 
 # 超级管理员手机号（normalize 后为 +8615520810759）
 SUPER_ADMIN_PHONE = "+8615520810759"
+LEGACY_DEFAULT_DISPLAY_NAMES = {"张晓明", "天机用户"}
+
+
+def default_display_name(phone: str) -> str:
+    digits = re.sub(r"\D", "", phone)
+    last4 = digits[-4:] if len(digits) >= 4 else "用户"
+    return f"天机{last4}"
 
 
 def can_review(user: AuthUser) -> bool:
@@ -276,6 +283,7 @@ class AuthService:
                 # 普通用户：首次登录自助开一个“独立个人”租户（C 方案中的个人自助）
                 user = AuthUser(
                     phone=phone,
+                    display_name=default_display_name(phone),
                     role=ROLE_MEMBER,
                     user_type=USER_TYPE_INDIVIDUAL,
                 )
@@ -293,6 +301,11 @@ class AuthService:
             # 幂等纠正：确保超管手机号始终是 super_admin
             user.role = ROLE_SUPER_ADMIN
             user.tenant_id = None
+        elif user.role != ROLE_SUPER_ADMIN:
+            digits = re.sub(r"\D", "", phone)
+            generated_names = LEGACY_DEFAULT_DISPLAY_NAMES | {f"用户{digits[-4:]}"}
+            if user.display_name in generated_names:
+                user.display_name = default_display_name(phone)
         user.last_login_at = now
         token = secrets.token_urlsafe(32)
         expires_at = now + timedelta(days=self.settings.auth_session_ttl_days)

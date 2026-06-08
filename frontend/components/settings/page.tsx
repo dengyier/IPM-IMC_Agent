@@ -201,7 +201,7 @@ function SectionCard({ title, action, children }: { title: string; action?: Reac
 
 function defaultDisplayName(phone?: string) {
   const last4 = (phone || "").replace(/\D/g, "").slice(-4) || "用户";
-  return `用户${last4}`;
+  return `天机${last4}`;
 }
 
 function userTypeLabel(userType: string) {

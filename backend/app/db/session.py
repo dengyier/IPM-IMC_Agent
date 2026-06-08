@@ -57,7 +57,7 @@ _COLUMN_ADDITIONS: dict[str, dict[str, str]] = {
     },
     "report_quality_checks": {"tenant_id": _TENANT_COL},
     "auth_users": {
-        "display_name": "VARCHAR(80) DEFAULT '张晓明'",
+        "display_name": "VARCHAR(80) DEFAULT '天机用户'",
         "role": "VARCHAR(40) DEFAULT 'member'",
         "status": "VARCHAR(20) DEFAULT 'active'",
         "last_login_at": "DATETIME",

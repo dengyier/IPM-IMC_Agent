@@ -62,6 +62,7 @@ function ChatMain({
     historyLoading,
     setInput,
     sendQuestion,
+    ensureActiveConversation,
     depositAttachment,
     depositMessage,
   } = useAssistant();
@@ -95,7 +96,8 @@ function ChatMain({
     setAttaching(true);
     setAttachError(null);
     try {
-      const res = await assistantApi.parseFile(file, activeConversationId);
+      const conversationId = await ensureActiveConversation();
+      const res = await assistantApi.parseFile(file, conversationId);
       if (!res.file_id || res.chunk_count <= 0) {
         setAttachError("未能从该文件解析出可追问内容。");
         return;
