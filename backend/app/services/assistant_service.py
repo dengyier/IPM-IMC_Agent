@@ -16,10 +16,12 @@ import re
 from sqlalchemy.orm import Session
 
 from app.schemas.assistant import AssistantAskResponse, AssistantNodeRef
+from app.schemas.tianji import TianjiSimulationResult
 from app.services.context_fusion_service import ContextFusionService, FusedContext
 from app.services.embeddings import EmbeddingProvider
 from app.services.llm import LLMService
 from app.services.problem_routing_service import ProblemRoutingService
+from app.services.tianji_simulation_service import TianjiSimulationService
 from app.services.vector_store import VectorStore
 
 ASSISTANT_SYSTEM = (
@@ -56,7 +58,7 @@ CASUAL_STARTERS = [
     "帮我判断这个商业模式是否成立",
     "我的目标客户是否足够清晰？",
     "我的价值主张有哪些风险？",
-    "生成一份商业画布诊断报告",
+    "生成一份项目验证诊断报告",
 ]
 
 
@@ -79,6 +81,8 @@ class AssistantService:
         company_context: str | None = None,
         file_context: str | None = None,
         conversation_history: list[dict[str, str]] | None = None,
+        project_history: str | None = None,
+        project_id: str | None = None,
         tenant_id: str | None = None,
     ) -> AssistantAskResponse:
         full_question = question.strip()
@@ -102,6 +106,16 @@ class AssistantService:
             routing,
             tenant_id=tenant_id,
         )
+        tianji_simulation = TianjiSimulationService(self.llm, embeddings=self.embeddings).run(
+            question=question,
+            project_context=company_context,
+            file_context=file_context,
+            history_text=history_text,
+            project_history=project_history,
+            routing=routing,
+            context=context,
+            mode="chat",
+        )
 
         llm_answer = self._llm_answer(
             question,
@@ -110,6 +124,7 @@ class AssistantService:
             history_text,
             routing.intent,
             context,
+            tianji_simulation,
         )
         answer = self._plain_text_answer(
             llm_answer or self._fallback_answer(question, routing.intent, context)
@@ -138,6 +153,7 @@ class AssistantService:
                 for n in context.nodes[:6]
             ],
             suggested_questions=suggested_questions,
+            tianji_simulation=tianji_simulation,
         )
 
     # ------------------------------------------------------------------ #
@@ -198,6 +214,7 @@ class AssistantService:
         history_text: str,
         intent: str,
         context: FusedContext,
+        tianji_simulation: TianjiSimulationResult | None = None,
     ) -> str | None:
         if not self.llm.available:
             return None
@@ -219,6 +236,7 @@ class AssistantService:
             {"type": e.extension_type, "title": e.title, "summary": e.summary}
             for e in (context.approved_expansions + context.cases)[:6]
         ]
+        simulation_context = self._simulation_for_prompt(tianji_simulation)
         user_prompt = (
             f"前序对话上下文（如果为空，说明这是新问题；如果不为空，必须结合上下文理解指代、合同/项目/企业背景和上一轮判断）：\n"
             f"{history_text or '（无）'}\n\n"
@@ -229,12 +247,32 @@ class AssistantService:
             f"系统识别意图（仅供参考，不必照搬）：{intent}\n"
             f"可自然融入的方法论判断要点（不要罗列、不要堆术语）：{method_points}\n"
             f"可选用的相关案例/补充材料：{approved_context}\n\n"
+            f"天机多路径推演结果（用于形成判断，回答时自然融入，不要输出 JSON 或字段名）：{simulation_context}\n\n"
             "请像资深商业顾问那样，直接、自然地回答用户这个问题：先给出你的核心判断或观点，"
             "再讲清依据和可落地的建议。结构、分点与否、篇幅都由问题本身的复杂度决定——"
             "简单问题就简短回应，不要为了凑结构而展开，也不要用套话开场。"
             "最终输出只能是普通中文正文，不要输出 Markdown，不要出现 ###、**、项目符号或表格。"
         )
         return self.llm.chat_text(ASSISTANT_SYSTEM, user_prompt, temperature=0.45)
+
+    @staticmethod
+    def _simulation_for_prompt(simulation: TianjiSimulationResult | None) -> dict:
+        if not simulation:
+            return {}
+        return {
+            "decision_frame": simulation.decision_frame.model_dump(mode="json"),
+            "scenario_paths": [
+                path.model_dump(mode="json") for path in simulation.scenario_paths[:4]
+            ],
+            "risk_audit": [
+                risk.model_dump(mode="json") for risk in simulation.risk_audit[:4]
+            ],
+            "validation_plan": [
+                step.model_dump(mode="json") for step in simulation.validation_plan[:4]
+            ],
+            "missing_information": simulation.missing_information[:5],
+            "algorithm_version": simulation.algorithm_version,
+        }
 
     @staticmethod
     def _history_to_text(history: list[dict[str, str]], max_chars: int = 6000) -> str:
@@ -271,7 +309,7 @@ class AssistantService:
             f"系统已将问题路由到「{intent}」方向，并调用 {node_names} 等 IMC&IPM 核心知识节点进行判断。\n\n"
             f"建议先从这些问题拆解：{checks}。\n\n"
             "下一步可以把企业背景、目标客户、产品/服务、竞争对手和当前卡点补充得更具体，"
-            "系统就能进一步生成商业画布诊断和可执行方案。"
+            "系统就能进一步生成项目验证诊断和可执行方案。"
         )
 
     @staticmethod
@@ -298,7 +336,7 @@ class AssistantService:
         if "知识" in question or "方法" in question:
             return "查看知识节点库", "/knowledge-nodes"
         if intent:
-            return "进入商业画布诊断", "/canvas-diagnosis"
+            return "进入项目验证诊断", "/canvas-diagnosis"
         return "查看知识节点库", "/knowledge-nodes"
 
     def _suggested_questions(

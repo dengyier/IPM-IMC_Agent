@@ -25,13 +25,11 @@ export function Sidebar({ activeKey = "home", showMobileMenu = true }: { activeK
       .summary()
       .then((data) => {
         if (!cancelled) {
-          console.log('Dashboard summary data:', data);
           setSummary(data);
           setError(false);
         }
       })
-      .catch((err) => {
-        console.error('Dashboard summary error:', err);
+      .catch(() => {
         if (!cancelled) setError(true);
       });
     return () => {
@@ -68,7 +66,7 @@ export function Sidebar({ activeKey = "home", showMobileMenu = true }: { activeK
                 <Icon name="boxes" className="h-5 w-5 text-white" strokeWidth={1.9} />
               </div>
               <div className="min-w-0 flex-1 leading-tight">
-                <div className="truncate text-[15.5px] font-black tracking-tight text-ink">IMC&IPM</div>
+                <div className="truncate text-[15.5px] font-black tracking-tight text-ink">天机AI</div>
                 <div className="mt-0.5 truncate text-[12px] font-semibold text-ink/85">商业决策智能体</div>
               </div>
               <button
@@ -100,28 +98,26 @@ export function Sidebar({ activeKey = "home", showMobileMenu = true }: { activeK
               ))}
             </nav>
 
-            {user?.is_super_admin && (
-              <div className="mx-3 mt-5 overflow-hidden rounded-2xl border border-indigo-100/80 bg-gradient-to-b from-indigo-50 to-white p-4 shadow-card">
-                <div className="text-[13px] font-bold text-brand">知识资产沉淀中</div>
-                <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
-                  每一次学习都会沉淀为可复用的知识资产
-                </p>
-                <a
-                  href="/knowledge-graph"
-                  onClick={() => setMobileOpen(false)}
-                  className="mt-3 flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-indigo-100 bg-white/85 text-[12px] font-bold text-brand transition-colors hover:bg-[#f6f5ff]"
-                >
-                  查看完整图谱
-                  <Icon name="chevron-right" className="h-3.5 w-3.5" />
-                </a>
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <AssetStat label="资料总数" value={error ? "—" : sourceTotal !== null ? fmtNum(sourceTotal) : "··"} unit="份" />
-                  <AssetStat label="知识节点" value={error ? "—" : summary ? fmtNum(summary.nodes) : "··"} unit="个" />
-                  <AssetStat label="关系边" value={error ? "—" : summary ? fmtNum(summary.edges) : "··"} unit="条" />
-                  <AssetStat label="待审核" value={error ? "—" : summary ? fmtNum(summary.pending_reviews) : "··"} unit="条" />
-                </div>
+            <div className="mx-3 mt-5 overflow-hidden rounded-2xl border border-indigo-100/80 bg-gradient-to-b from-indigo-50 to-white p-4 shadow-card">
+              <div className="text-[13px] font-bold text-brand">知识资产沉淀中</div>
+              <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
+                每一次学习都会沉淀为可复用的知识资产
+              </p>
+              <a
+                href="/knowledge-graph"
+                onClick={() => setMobileOpen(false)}
+                className="mt-3 flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-indigo-100 bg-white/85 text-[12px] font-bold text-brand transition-colors hover:bg-[#f6f5ff]"
+              >
+                查看完整图谱
+                <Icon name="chevron-right" className="h-3.5 w-3.5" />
+              </a>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <AssetStat label="资料总数" value={error ? "—" : sourceTotal !== null ? fmtNum(sourceTotal) : "··"} unit="份" />
+                <AssetStat label="知识节点" value={error ? "—" : summary ? fmtNum(summary.nodes) : "··"} unit="个" />
+                <AssetStat label="关系边" value={error ? "—" : summary ? fmtNum(summary.edges) : "··"} unit="条" />
+                <AssetStat label="待审核" value={error ? "—" : summary ? fmtNum(summary.pending_reviews) : "··"} unit="条" />
               </div>
-            )}
+            </div>
 
             <div className="mt-auto border-t border-line">
               <button
@@ -153,7 +149,7 @@ export function Sidebar({ activeKey = "home", showMobileMenu = true }: { activeK
           <Icon name="boxes" className="h-5 w-5 text-white" strokeWidth={1.9} />
         </div>
         <div className="leading-tight">
-          <div className="text-[15.5px] font-black tracking-tight text-ink">IMC&IPM</div>
+          <div className="text-[15.5px] font-black tracking-tight text-ink">天机AI</div>
           <div className="mt-0.5 text-[12px] font-semibold text-ink/85">商业决策智能体</div>
         </div>
       </div>
@@ -177,38 +173,35 @@ export function Sidebar({ activeKey = "home", showMobileMenu = true }: { activeK
         ))}
       </nav>
 
-      {/* Asset card - 仅超级管理员可见 */}
-      {user?.is_super_admin && (
-        <div className="mx-3 mt-6 overflow-hidden rounded-2xl border border-indigo-100/80 bg-gradient-to-b from-indigo-50 to-white p-4 shadow-card">
-          <div className="text-[13px] font-bold text-brand">知识资产沉淀中</div>
-          <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
-            每一次学习都会沉淀为可复用的知识资产
-          </p>
-          <a
-            href="/knowledge-graph"
-            className="mt-3 flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-indigo-100 bg-white/85 text-[12px] font-bold text-brand transition-colors hover:bg-[#f6f5ff]"
-          >
-            查看完整图谱
-            <Icon name="chevron-right" className="h-3.5 w-3.5" />
-          </a>
-          <div className="mt-4 space-y-3">
-            <AssetStat label="资料总数" value={error ? "—" : sourceTotal !== null ? fmtNum(sourceTotal) : "··"} unit="份" />
-            <AssetStat label="知识节点总数" value={error ? "—" : summary ? fmtNum(summary.nodes) : "··"} unit="个" />
-            <AssetStat label="关系边总数" value={error ? "—" : summary ? fmtNum(summary.edges) : "··"} unit="条" />
-            <AssetStat label="诊断报告总数" value={error ? "—" : summary ? fmtNum(summary.reports) : "··"} unit="份" />
-            <AssetStat label="待审核任务" value={error ? "—" : summary ? fmtNum(summary.pending_reviews) : "··"} unit="条" />
-          </div>
-          <div className="mt-2 flex justify-center pb-1 pt-1">
-            <div className="isometric-blocks">
-              <span className="left-[16px] top-[70px] h-[22px] w-[104px] rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500" />
-              <span className="left-[34px] top-[52px] h-[28px] w-[34px] rounded-lg bg-gradient-to-br from-[#4c43df] to-[#7f6bff]" />
-              <span className="left-[73px] top-[34px] h-[48px] w-[34px] rounded-lg bg-gradient-to-br from-[#7d66ff] to-[#b49aff]" />
-              <span className="left-[88px] top-[58px] h-[25px] w-[18px] rounded-md bg-white/40" />
-              <span className="left-[19px] top-[83px] h-[12px] w-[76px] rounded-lg bg-gradient-to-r from-blue-500 to-violet-400 opacity-70" />
-            </div>
+      <div className="mx-3 mt-6 overflow-hidden rounded-2xl border border-indigo-100/80 bg-gradient-to-b from-indigo-50 to-white p-4 shadow-card">
+        <div className="text-[13px] font-bold text-brand">知识资产沉淀中</div>
+        <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
+          每一次学习都会沉淀为可复用的知识资产
+        </p>
+        <a
+          href="/knowledge-graph"
+          className="mt-3 flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-indigo-100 bg-white/85 text-[12px] font-bold text-brand transition-colors hover:bg-[#f6f5ff]"
+        >
+          查看完整图谱
+          <Icon name="chevron-right" className="h-3.5 w-3.5" />
+        </a>
+        <div className="mt-4 space-y-3">
+          <AssetStat label="资料总数" value={error ? "—" : sourceTotal !== null ? fmtNum(sourceTotal) : "··"} unit="份" />
+          <AssetStat label="知识节点总数" value={error ? "—" : summary ? fmtNum(summary.nodes) : "··"} unit="个" />
+          <AssetStat label="关系边总数" value={error ? "—" : summary ? fmtNum(summary.edges) : "··"} unit="条" />
+          <AssetStat label="诊断报告总数" value={error ? "—" : summary ? fmtNum(summary.reports) : "··"} unit="份" />
+          <AssetStat label="待审核任务" value={error ? "—" : summary ? fmtNum(summary.pending_reviews) : "··"} unit="条" />
+        </div>
+        <div className="mt-2 flex justify-center pb-1 pt-1">
+          <div className="isometric-blocks">
+            <span className="left-[16px] top-[70px] h-[22px] w-[104px] rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500" />
+            <span className="left-[34px] top-[52px] h-[28px] w-[34px] rounded-lg bg-gradient-to-br from-[#4c43df] to-[#7f6bff]" />
+            <span className="left-[73px] top-[34px] h-[48px] w-[34px] rounded-lg bg-gradient-to-br from-[#7d66ff] to-[#b49aff]" />
+            <span className="left-[88px] top-[58px] h-[25px] w-[18px] rounded-md bg-white/40" />
+            <span className="left-[19px] top-[83px] h-[12px] w-[76px] rounded-lg bg-gradient-to-r from-blue-500 to-violet-400 opacity-70" />
           </div>
         </div>
-      )}
+      </div>
 
       {/* User */}
       <div className="mt-auto border-t border-line">

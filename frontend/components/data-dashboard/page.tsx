@@ -14,6 +14,7 @@ import {
   type RecentReport,
   type RecentReviewTask,
   type SystemHealth,
+  type TianjiMetrics,
 } from "@/lib/api";
 import {
   fmtNum,
@@ -31,6 +32,7 @@ type LoadState = {
   reviewTasks: RecentReviewTask[];
   categories: NodeCategory[];
   health: SystemHealth | null;
+  tianjiMetrics: TianjiMetrics | null;
 };
 
 const emptyState: LoadState = {
@@ -40,12 +42,18 @@ const emptyState: LoadState = {
   reviewTasks: [],
   categories: [],
   health: null,
+  tianjiMetrics: null,
 };
 
-export function DataDashboardPage() {
+type DataDashboardPageProps = {
+  variant?: "home" | "dashboard";
+};
+
+export function DataDashboardPage({ variant = "dashboard" }: DataDashboardPageProps = {}) {
   const [state, setState] = useState<LoadState>(emptyState);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isHome = variant === "home";
 
   useEffect(() => {
     let cancelled = false;
@@ -56,10 +64,11 @@ export function DataDashboardPage() {
       dashboardApi.recentReviewTasks(6),
       nodesApi.categories(10),
       systemApi.health(),
+      dashboardApi.tianjiMetrics(30),
     ])
-      .then(([summary, pending, reports, reviewTasks, categories, health]) => {
+      .then(([summary, pending, reports, reviewTasks, categories, health, tianjiMetrics]) => {
         if (!cancelled) {
-          setState({ summary, pending, reports, reviewTasks, categories, health });
+          setState({ summary, pending, reports, reviewTasks, categories, health, tianjiMetrics });
           setError(null);
         }
       })
@@ -87,15 +96,21 @@ export function DataDashboardPage() {
     <main className="flex min-w-0 flex-1 flex-col overflow-y-auto px-8 py-6">
       <header className="flex items-start justify-between gap-6">
         <div>
-          <a
-            href="/"
-            className="mb-4 inline-flex h-9 w-9 items-center justify-center rounded-xl border border-line bg-white text-[#172452] hover:text-brand"
-          >
-            <Icon name="chevron-left" className="h-4 w-4" />
-          </a>
-          <h1 className="text-[28px] font-black tracking-[-0.03em] text-ink">数据看板</h1>
+          {!isHome && (
+            <a
+              href="/"
+              className="mb-4 inline-flex h-9 w-9 items-center justify-center rounded-xl border border-line bg-white text-[#172452] hover:text-brand"
+            >
+              <Icon name="chevron-left" className="h-4 w-4" />
+            </a>
+          )}
+          <h1 className="text-[28px] font-black tracking-[-0.03em] text-ink">
+            {isHome ? "经营工作台" : "数据看板"}
+          </h1>
           <p className="mt-1.5 text-[13px] font-medium text-slate-500">
-            聚合资料、知识节点、诊断报告、审核任务与系统健康状态。
+            {isHome
+              ? "汇总项目验证、知识资产、诊断报告、审核任务与系统健康状态。"
+              : "聚合资料、知识节点、诊断报告、审核任务与系统健康状态。"}
           </p>
         </div>
         <div className="dashboard-card flex items-center gap-3 rounded-2xl px-4 py-3">
@@ -118,6 +133,33 @@ export function DataDashboardPage() {
         <MetricCard icon="share" label="知识节点" value={loadingValue(loading, state.summary?.nodes)} unit="个" />
         <MetricCard icon="git-merge" label="关系边" value={loadingValue(loading, state.summary?.edges)} unit="条" />
         <MetricCard icon="file-bar-chart" label="诊断报告" value={loadingValue(loading, state.summary?.reports)} unit="份" />
+      </section>
+
+      <section className="mt-5 grid grid-cols-4 gap-5">
+        <MetricCard
+          icon="route"
+          label="多路径覆盖"
+          value={loadingPercent(loading, state.tianjiMetrics?.multi_path_coverage_rate)}
+          unit=""
+        />
+        <MetricCard
+          icon="clipboard-check"
+          label="验证回填率"
+          value={loadingPercent(loading, state.tianjiMetrics?.validation_feedback_rate)}
+          unit=""
+        />
+        <MetricCard
+          icon="git-merge"
+          label="图谱扩展均值"
+          value={loadingDecimal(loading, state.tianjiMetrics?.avg_graph_expanded_nodes)}
+          unit="个"
+        />
+        <MetricCard
+          icon="archive"
+          label="推演沉淀"
+          value={loadingValue(loading, state.tianjiMetrics?.tianji_deposit_count)}
+          unit="次"
+        />
       </section>
 
       <section className="mt-5 grid grid-cols-[1.2fr_0.8fr] gap-5">
@@ -365,6 +407,16 @@ function toComponentStatus(status: string): ComponentStatus {
 function loadingValue(loading: boolean, value: number | undefined) {
   if (loading) return "··";
   return fmtNum(value ?? 0);
+}
+
+function loadingPercent(loading: boolean, value: number | undefined) {
+  if (loading) return "··";
+  return `${Math.round((value ?? 0) * 100)}%`;
+}
+
+function loadingDecimal(loading: boolean, value: number | undefined) {
+  if (loading) return "··";
+  return String(Number(value ?? 0).toFixed(1));
 }
 
 function formatTime(iso: string | null) {

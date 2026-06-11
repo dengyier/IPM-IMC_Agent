@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from app.schemas.diagnosis import CANVAS_MODULES, DiagnoseRequest, RoutingDecision
+from app.schemas.tianji import TianjiSimulationResult
 from app.services.context_fusion_service import FusedContext
 from app.services.llm import LLMService
 
@@ -59,12 +60,13 @@ class DiagnosisService:
         request: DiagnoseRequest,
         routing: RoutingDecision,
         context: FusedContext,
+        tianji_simulation: TianjiSimulationResult | None = None,
     ) -> tuple[dict, bool]:
         """返回 (report_payload, used_llm)。"""
-        llm_result = self._llm_diagnose(request, routing, context)
+        llm_result = self._llm_diagnose(request, routing, context, tianji_simulation)
         if llm_result:
             return llm_result, True
-        return self._local_diagnose(request, routing, context), False
+        return self._local_diagnose(request, routing, context, tianji_simulation), False
 
     # ------------------------------------------------------------------ #
     # LLM 诊断
@@ -75,6 +77,7 @@ class DiagnosisService:
         request: DiagnoseRequest,
         routing: RoutingDecision,
         context: FusedContext,
+        tianji_simulation: TianjiSimulationResult | None = None,
     ) -> dict | None:
         if not self.llm or not self.llm.available:
             return None
@@ -96,6 +99,7 @@ class DiagnosisService:
             {"type": e.extension_type, "title": e.title, "summary": e.summary}
             for e in (context.approved_expansions + context.cases)[:8]
         ]
+        tianji_payload = self._tianji_for_report_prompt(tianji_simulation)
         # 画布按中文标签呈现，便于 LLM 对齐
         canvas_cn = {
             MODULE_LABELS.get(m, m): (request.canvas or {}).get(m, "").strip() or "（未填写）"
@@ -109,6 +113,7 @@ class DiagnosisService:
             f"# 商业模式画布（用户填写，中文键）\n{canvas_cn}\n\n"
             f"# 可援引的方法论判断要点（港大 IMC&IPM，共 {len(method_points)} 条，已消化）\n{method_points}\n\n"
             f"# 已审核的补充证据 / 案例（可作为佐证，{len(expansions)} 条）\n{expansions}\n\n"
+            f"# 天机多路径推演结果（必须吸收进报告，不能原样输出 JSON）\n{tianji_payload or '（无）'}\n\n"
             f"# 报告深度\n{request.report_depth}\n\n"
             "# 内部结构化返回要求（注意：字段值必须是自然语言报告内容，不能包含 JSON 字符串或代码块）\n"
             "{\n"
@@ -158,7 +163,7 @@ class DiagnosisService:
         )
         if not data:
             return None
-        return self._assemble(data, routing, context, request)
+        return self._assemble(data, routing, context, request, tianji_simulation)
 
     # ------------------------------------------------------------------ #
     # 本地确定性诊断
@@ -169,6 +174,7 @@ class DiagnosisService:
         request: DiagnoseRequest,
         routing: RoutingDecision,
         context: FusedContext,
+        tianji_simulation: TianjiSimulationResult | None = None,
     ) -> dict:
         canvas = request.canvas or {}
         target_modules = routing.canvas_modules or CANVAS_MODULES
@@ -219,7 +225,7 @@ class DiagnosisService:
             "overall_summary": summary,
             **rich,
         }
-        return self._assemble(data, routing, context, request)
+        return self._assemble(data, routing, context, request, tianji_simulation)
 
     def _module_checks(
         self, module: str, text: str, context: FusedContext
@@ -316,6 +322,7 @@ class DiagnosisService:
         routing: RoutingDecision,
         context: FusedContext,
         request: DiagnoseRequest,
+        tianji_simulation: TianjiSimulationResult | None = None,
     ) -> dict:
         module_findings = self._normalize_module_findings(data.get("module_findings") or {})
         fallback_sections = self._local_rich_sections(request, routing, context, module_findings)
@@ -327,6 +334,40 @@ class DiagnosisService:
         ninety_day_plan = _as_dict(data.get("ninety_day_plan"))
         core_tensions = _as_dict_list(data.get("core_tensions"))
         cross_canvas_logic = _as_dict_list(data.get("cross_canvas_logic"))
+        decision_frame = _as_dict(data.get("decision_frame"))
+        decision_roles = _as_dict_list(data.get("decision_roles"))
+        scenario_paths = _as_dict_list(data.get("scenario_paths"))
+        causal_chains = _as_dict_list(data.get("causal_chains"))
+        tianji_risk_audit = _as_dict_list(data.get("tianji_risk_audit"))
+        validation_plan = _as_dict_list(data.get("validation_plan"))
+        contradictions = _as_list(data.get("contradictions"))
+        assumption_status = _as_dict_list(data.get("assumption_status"))
+        roles_degraded = bool(data.get("roles_degraded") or False)
+        role_similarity_max = _float(data.get("role_similarity_max"), 0.0)
+        debate_rounds = _as_dict_list(data.get("debate_rounds"))
+        consensus = _as_list(data.get("consensus"))
+        disagreements = _as_list(data.get("disagreements"))
+        archive_candidates = _as_list(data.get("archive_candidates"))
+        algorithm_version = data.get("algorithm_version")
+        if tianji_simulation:
+            tianji_dump = tianji_simulation.model_dump(mode="json")
+            decision_frame = decision_frame or tianji_dump.get("decision_frame", {})
+            decision_roles = decision_roles or tianji_dump.get("decision_roles", [])
+            scenario_paths = scenario_paths or tianji_dump.get("scenario_paths", [])
+            causal_chains = causal_chains or tianji_dump.get("causal_chains", [])
+            tianji_risk_audit = tianji_risk_audit or tianji_dump.get("risk_audit", [])
+            validation_plan = validation_plan or tianji_dump.get("validation_plan", [])
+            contradictions = contradictions or tianji_dump.get("contradictions", [])
+            assumption_status = assumption_status or tianji_dump.get("assumption_status", [])
+            roles_degraded = roles_degraded or bool(tianji_dump.get("roles_degraded"))
+            role_similarity_max = role_similarity_max or _float(
+                tianji_dump.get("role_similarity_max"), 0.0
+            )
+            debate_rounds = debate_rounds or tianji_dump.get("debate_rounds", [])
+            consensus = consensus or tianji_dump.get("consensus", [])
+            disagreements = disagreements or tianji_dump.get("disagreements", [])
+            archive_candidates = archive_candidates or tianji_dump.get("archive_candidates", [])
+            algorithm_version = algorithm_version or tianji_dump.get("algorithm_version")
         if not executive_summary:
             executive_summary = fallback_sections["executive_summary"]
         if not core_tensions:
@@ -338,7 +379,7 @@ class DiagnosisService:
         if not risk_matrix:
             risk_matrix = fallback_sections["risk_matrix"]
         if not mvp_path:
-            mvp_path = fallback_sections["mvp_validation_path"]
+            mvp_path = self._mvp_from_tianji(validation_plan) or fallback_sections["mvp_validation_path"]
         if not ninety_day_plan:
             ninety_day_plan = fallback_sections["ninety_day_plan"]
         if not final_recommendation:
@@ -355,7 +396,11 @@ class DiagnosisService:
                 criteria = "；".join(_as_list(stage.get("success_criteria"))) or "形成可判断的验证结果"
                 recommended_actions.append(f"{objective}：{criteria}")
         evidence_refs = [
-            {"type": "methodology_node", "ref": n.node_name, "node_id": n.id}
+            {
+                "type": n.source if n.source == "graph_expanded" else "methodology_node",
+                "ref": n.node_name,
+                "node_id": n.id,
+            }
             for n in context.nodes[:8]
         ] + [
             {
@@ -372,11 +417,26 @@ class DiagnosisService:
             "executive_summary": executive_summary,
             "core_tensions": core_tensions,
             "cross_canvas_logic": cross_canvas_logic,
+            "decision_frame": decision_frame,
+            "decision_roles": decision_roles,
+            "scenario_paths": scenario_paths,
+            "causal_chains": causal_chains,
             "unit_economics": unit_economics,
             "risk_matrix": risk_matrix,
+            "tianji_risk_audit": tianji_risk_audit,
             "mvp_validation_path": mvp_path,
+            "validation_plan": validation_plan,
+            "contradictions": contradictions,
+            "assumption_status": assumption_status,
+            "roles_degraded": roles_degraded,
+            "role_similarity_max": role_similarity_max,
+            "debate_rounds": debate_rounds,
+            "consensus": consensus,
+            "disagreements": disagreements,
             "ninety_day_plan": ninety_day_plan,
             "final_recommendation": final_recommendation,
+            "archive_candidates": archive_candidates,
+            "algorithm_version": algorithm_version,
             "key_assumptions": _as_list(data.get("key_assumptions")),
             "risks": risks,
             "recommended_actions": recommended_actions,
@@ -409,6 +469,53 @@ class DiagnosisService:
                 "confidence": _as_float(raw.get("confidence")),
             }
         return normalized
+
+    @staticmethod
+    def _tianji_for_report_prompt(
+        simulation: TianjiSimulationResult | None,
+    ) -> dict:
+        if not simulation:
+            return {}
+        return {
+            "algorithm_version": simulation.algorithm_version,
+            "decision_frame": simulation.decision_frame.model_dump(mode="json"),
+            "decision_roles": [
+                role.model_dump(mode="json") for role in simulation.decision_roles[:6]
+            ],
+            "scenario_paths": [
+                path.model_dump(mode="json") for path in simulation.scenario_paths[:5]
+            ],
+            "causal_chains": [
+                chain.model_dump(mode="json") for chain in simulation.causal_chains[:6]
+            ],
+            "risk_audit": [
+                risk.model_dump(mode="json") for risk in simulation.risk_audit[:6]
+            ],
+            "validation_plan": [
+                step.model_dump(mode="json") for step in simulation.validation_plan[:6]
+            ],
+            "missing_information": simulation.missing_information[:6],
+        }
+
+    @staticmethod
+    def _mvp_from_tianji(validation_plan: list[dict]) -> list[dict]:
+        if not validation_plan:
+            return []
+        path: list[dict] = []
+        for item in validation_plan[:5]:
+            stage = item.get("step") or item.get("objective") or "验证动作"
+            action = item.get("action") or ""
+            criteria = item.get("success_criteria") or ""
+            path.append(
+                {
+                    "stage": stage,
+                    "objective": item.get("objective") or stage,
+                    "actions": [action] if action else [],
+                    "success_criteria": [criteria] if criteria else [],
+                    "duration": item.get("duration") or "7天内",
+                }
+            )
+        return path
 
     def _local_rich_sections(
         self,

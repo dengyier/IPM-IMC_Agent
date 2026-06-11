@@ -12,7 +12,9 @@ import {
   DiagnosisReport,
   diagnosisApi,
   pollTask,
+  projectApi,
   reportsApi,
+  type Project,
 } from "@/lib/api";
 import {
   CANVAS_MODULE_ORDER,
@@ -54,11 +56,14 @@ const MODULE_HINTS: Record<string, string> = {
   cost_structure: "主要成本结构是什么？",
 };
 
-export function CanvasDiagnosisPage() {
+export function CanvasDiagnosisPage({ initialProjectId = null }: { initialProjectId?: string | null }) {
   const [title, setTitle] = useState("");
   const [company, setCompany] = useState("");
   const [question, setQuestion] = useState("");
   const [canvas, setCanvas] = useState<Record<string, string>>({});
+  const [projectContext, setProjectContext] = useState<Project | null>(null);
+  const [projectLoading, setProjectLoading] = useState(false);
+  const [projectError, setProjectError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState(0);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
@@ -67,6 +72,42 @@ export function CanvasDiagnosisPage() {
   const isMobile = useIsMobile();
 
   const setModule = (k: string, v: string) => setCanvas((p) => ({ ...p, [k]: v }));
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!initialProjectId) {
+      setProjectContext(null);
+      setProjectError(null);
+      return;
+    }
+    setProjectLoading(true);
+    setProjectError(null);
+    projectApi
+      .detail(initialProjectId)
+      .then((project) => {
+        if (cancelled) return;
+        setProjectContext(project);
+        setTitle((current) => current || project.name || "");
+        setCompany((current) => current || project.industry || "");
+        setQuestion((current) => current || project.current_problem || "");
+        setCanvas((current) => ({
+          ...current,
+          customer_segments: current.customer_segments || project.target_customer || "",
+        }));
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setProjectContext(null);
+          setProjectError(error instanceof ApiError ? error.message : "经营档案加载失败");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setProjectLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialProjectId]);
 
   const filledModules = CANVAS_MODULE_ORDER.filter((m) => (canvas[m] ?? "").trim()).length;
   const hasDiagnosticInput = question.trim().length > 0 || filledModules > 0;
@@ -95,6 +136,8 @@ export function CanvasDiagnosisPage() {
         question: question.trim(),
         report_depth: "consulting",
         canvas: cleanCanvas,
+        project_id: projectContext?.id ?? initialProjectId ?? null,
+        task_pack: projectContext?.task_pack,
       });
       setStatusMsg("AI 分析中（数十秒~分钟级）…");
       const task = await pollTask<DiagnoseResult>(task_id, {
@@ -146,6 +189,9 @@ export function CanvasDiagnosisPage() {
         onModule={setModule}
         onDiagnose={handleDiagnose}
         result={result}
+        projectContext={projectContext}
+        projectLoading={projectLoading}
+        projectError={projectError}
       />
     );
   }
@@ -172,6 +218,9 @@ export function CanvasDiagnosisPage() {
             onQuestion={setQuestion}
             onModule={setModule}
             onDiagnose={handleDiagnose}
+            projectContext={projectContext}
+            projectLoading={projectLoading}
+            projectError={projectError}
           />
           <RecentDiagnoses refreshKey={reportsRefreshKey} />
         </div>
@@ -188,9 +237,9 @@ function DiagnosisHeader() {
   return (
     <header className="flex items-start justify-between gap-5">
       <div>
-        <h1 className="text-[27px] font-black tracking-[-0.03em] text-ink">商业画布诊断</h1>
+        <h1 className="text-[27px] font-black tracking-[-0.03em] text-ink">项目验证诊断</h1>
         <p className="mt-1.5 text-[13px] font-medium text-slate-500">
-          基于 IMC&IPM 方法论，结合知识节点与案例，为你的项目生成结构化诊断报告
+          基于港大 IMC&IPM 方法论、知识节点与案例，为你的项目生成验证路径、风险审计和结构化诊断报告
         </p>
       </div>
     </header>
@@ -247,6 +296,9 @@ function ProjectForm({
   onQuestion,
   onModule,
   onDiagnose,
+  projectContext,
+  projectLoading,
+  projectError,
 }: {
   title: string;
   company: string;
@@ -263,6 +315,9 @@ function ProjectForm({
   onQuestion: (v: string) => void;
   onModule: (k: string, v: string) => void;
   onDiagnose: () => void;
+  projectContext: Project | null;
+  projectLoading: boolean;
+  projectError: string | null;
 }) {
   return (
     <Card className="px-6 py-5">
@@ -270,6 +325,14 @@ function ProjectForm({
         <h2 className="text-[17px] font-black text-ink">告诉智能体你的项目</h2>
         <p className="text-[13px] font-semibold text-slate-500">填写越完整，分析越精准（已填 {filledModules}/9 画布模块）</p>
       </div>
+
+      {(projectContext || projectLoading || projectError) && (
+        <ProjectLinkNotice
+          project={projectContext}
+          loading={projectLoading}
+          error={projectError}
+        />
+      )}
 
       <div className="mt-5 grid gap-5 md:grid-cols-2">
         <Field label="项目名称" required>
@@ -353,6 +416,55 @@ function ProjectForm({
         </button>
       </div>
     </Card>
+  );
+}
+
+function projectTaskPackLabel(project: Project) {
+  const labels: Record<Project["task_pack"], string> = {
+    new_project: "新项目验证",
+    sales_growth: "销售增长",
+    ai_acquisition: "AI 获客",
+    review: "经营复盘",
+  };
+  return labels[project.task_pack] ?? project.task_pack;
+}
+
+function ProjectLinkNotice({
+  project,
+  loading,
+  error,
+}: {
+  project: Project | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  if (loading) {
+    return (
+      <div className="mt-4 rounded-2xl border border-line bg-white px-4 py-3 text-[13px] font-semibold text-slate-500">
+        正在读取经营档案上下文...
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="mt-4 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 text-[13px] font-semibold text-rose-500">
+        经营档案读取失败：{error}
+      </div>
+    );
+  }
+  if (!project) return null;
+  return (
+    <div className="mt-4 rounded-2xl border border-[#dcd6ff] bg-[#fbfaff] px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[13px] font-black text-[#172452]">已关联经营档案：{project.name}</span>
+        <span className="rounded-full bg-[#f0edff] px-2 py-0.5 text-[11px] font-bold text-brand">
+          {projectTaskPackLabel(project)}
+        </span>
+      </div>
+      <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-slate-500">
+        {project.current_problem || project.target_customer || "本次诊断会保存到该项目时间线。"}
+      </p>
+    </div>
   );
 }
 
@@ -594,7 +706,7 @@ function ResultList({
 }
 
 // ----------------------------------------------------------------------------- //
-// 移动端：商业画布诊断（字段行列表 + 底部编辑 sheet + 固定开始按钮）
+// 移动端：项目验证诊断（字段行列表 + 底部编辑 sheet + 固定开始按钮）
 // ----------------------------------------------------------------------------- //
 
 type MobileField = {
@@ -636,6 +748,9 @@ function MobileCanvasForm({
   onModule,
   onDiagnose,
   result,
+  projectContext,
+  projectLoading,
+  projectError,
 }: {
   title: string;
   company: string;
@@ -652,6 +767,9 @@ function MobileCanvasForm({
   onModule: (k: string, v: string) => void;
   onDiagnose: () => void;
   result: DiagnoseResult | null;
+  projectContext: Project | null;
+  projectLoading: boolean;
+  projectError: string | null;
 }) {
   const [editingKey, setEditingKey] = useState<string | null>(null);
 
@@ -685,7 +803,7 @@ function MobileCanvasForm({
         >
           <Icon name="chevron-left" className="h-5 w-5" />
         </button>
-        <div className="min-w-0 flex-1 truncate text-center text-[15px] font-black text-ink">商业画布诊断</div>
+        <div className="min-w-0 flex-1 truncate text-center text-[15px] font-black text-ink">项目验证诊断</div>
         <PendingTaskBell />
         <a href="/chat" className="flex h-9 w-9 items-center justify-center rounded-full text-[#172452] hover:text-brand" title="对话历史">
           <Icon name="history" className="h-5 w-5" />
@@ -693,6 +811,14 @@ function MobileCanvasForm({
       </header>
 
       <div className="space-y-2.5 px-4 pt-2">
+        {(projectContext || projectLoading || projectError) && (
+          <ProjectLinkNotice
+            project={projectContext}
+            loading={projectLoading}
+            error={projectError}
+          />
+        )}
+
         {/* 进度卡 */}
         <div className="flex items-center gap-4 rounded-2xl border border-line bg-white p-4 shadow-[0_10px_24px_rgba(30,58,138,0.05)]">
           <ProgressRing value={completion} />

@@ -9,6 +9,7 @@ import {
   type AssistantDepositMessageResult,
   type AssistantMessageRecord,
   type AssistantNodeRef,
+  type TianjiSimulationResult,
 } from "@/lib/api";
 
 export type AssistantMessage = {
@@ -18,6 +19,7 @@ export type AssistantMessage = {
   attachments?: AssistantAttachment[];
   nodeRefs?: AssistantNodeRef[];
   suggestedQuestions?: string[];
+  tianjiSimulation?: TianjiSimulationResult | null;
   usedLlm?: boolean;
   depositedSourceId?: string | null;
   itemCount?: number | null;
@@ -37,7 +39,12 @@ type AssistantContextValue = {
   loading: boolean;
   historyLoading: boolean;
   setInput: (value: string) => void;
-  sendQuestion: (question?: string, companyContext?: string, attachments?: AssistantAttachment[]) => Promise<void>;
+  sendQuestion: (
+    question?: string,
+    companyContext?: string,
+    attachments?: AssistantAttachment[],
+    projectId?: string | null
+  ) => Promise<void>;
   createConversation: () => Promise<void>;
   ensureActiveConversation: () => Promise<string | null>;
   selectConversation: (id: string) => Promise<void>;
@@ -58,7 +65,7 @@ const WELCOME_MESSAGE: AssistantMessage = {
   id: "welcome",
   role: "assistant",
   content:
-    "你好，我是 IMC&IPM 智能助手。你可以直接输入企业诉求，我会结合核心知识节点与 DeepSeek，给出基于 IMC&IPM 方法论的解决建议。",
+    "你好，我是天机AI商业决策智能体。你可以直接输入企业诉求，我会结合港大 IMC&IPM 核心方法论、知识图谱与 DeepSeek，给出可执行的商业判断、风险审计和验证计划。",
 };
 
 function titleFromQuestion(question: string): string {
@@ -103,6 +110,7 @@ function mapRecordToMessage(record: AssistantMessageRecord): AssistantMessage {
     sourceStatus: record.source_status,
     nodeRefs: record.node_refs,
     suggestedQuestions: record.suggested_questions,
+    tianjiSimulation: record.tianji_simulation ?? null,
     action:
       record.action_label && record.action_href
         ? { label: record.action_label, href: record.action_href }
@@ -307,7 +315,12 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   }, [replaceDraftConversation, setActiveConversation]);
 
   const sendQuestion = useCallback(
-    async (question?: string, companyContext?: string, attachments?: AssistantAttachment[]) => {
+    async (
+      question?: string,
+      companyContext?: string,
+      attachments?: AssistantAttachment[],
+      projectId?: string | null
+    ) => {
       const text = (question ?? input).trim();
       if (!text || loadingConversationId) return;
       const now = new Date().toISOString();
@@ -357,7 +370,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       rememberInput("", conversationId);
       setLoadingConversationId(conversationId);
       try {
-        const result = await assistantApi.ask(text, companyContext, apiConversationId, attachments);
+        const result = await assistantApi.ask(text, companyContext, apiConversationId, attachments, projectId);
         const nextConversationId = result.conversation_id || conversationId;
         const assistantMessage: AssistantMessage = {
           id: result.assistant_message_id || `a-${Date.now()}`,
@@ -366,6 +379,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
           usedLlm: result.used_llm,
           nodeRefs: result.node_refs,
           suggestedQuestions: result.suggested_questions,
+          tianjiSimulation: result.tianji_simulation ?? null,
           action:
             result.action_label && result.action_href
               ? { label: result.action_label, href: result.action_href }

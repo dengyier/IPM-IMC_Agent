@@ -19,8 +19,10 @@ from app.api.routers import (
     expansion,
     feedback,
     methodology,
+    project,
     system,
     tasks,
+    validation,
 )
 from app.core.config import get_settings
 from app.db.session import init_db
@@ -56,6 +58,8 @@ def create_app() -> FastAPI:
     app.include_router(expansion.review_router)
     app.include_router(diagnosis.router)
     app.include_router(feedback.router)
+    app.include_router(project.router)
+    app.include_router(validation.router)
 
     @app.get("/")
     def root() -> dict:

@@ -34,6 +34,7 @@ class AssistantMessage(Base):
     attachments: Mapped[list] = mapped_column(JsonType, default=list)
     node_refs: Mapped[list] = mapped_column(JsonType, default=list)
     suggested_questions: Mapped[list] = mapped_column(JsonType, default=list)
+    tianji_simulation: Mapped[dict | None] = mapped_column(JsonType, default=dict)
     used_llm: Mapped[bool] = mapped_column(Boolean, default=False)
     action_label: Mapped[str | None] = mapped_column(String(120))
     action_href: Mapped[str | None] = mapped_column(String(255))

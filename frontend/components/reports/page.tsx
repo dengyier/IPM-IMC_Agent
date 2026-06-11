@@ -66,7 +66,24 @@ function asText(value: unknown): string {
   if (Array.isArray(value)) return value.map(asText).filter(Boolean).join("；");
   if (value && typeof value === "object") {
     const obj = value as Record<string, unknown>;
-    const preferred = ["risk", "tension", "logic_chain", "objective", "action", "recommendation", "assumption", "finding", "title", "stage"];
+    const preferred = [
+      "risk",
+      "tension",
+      "logic_chain",
+      "decision_objective",
+      "chain",
+      "description",
+      "decision_implication",
+      "objective",
+      "action",
+      "recommendation",
+      "assumption",
+      "finding",
+      "title",
+      "stage",
+      "role",
+      "name",
+    ];
     const parts = preferred.map((key) => asText(obj[key])).filter(Boolean);
     if (parts.length > 0) return parts.slice(0, 4).join("；");
     return Object.values(obj).map(asText).filter(Boolean).slice(0, 4).join("；");
@@ -499,6 +516,24 @@ function ReportDetail({
   const mvpPath = asObjectList<RoadmapStage>(report.mvp_validation_path);
   const ninetyDayPlan = asObject(report.ninety_day_plan);
   const finalRecommendation = asObject(report.final_recommendation);
+  const decisionFrame = asObject(report.decision_frame);
+  const decisionRoles = asObjectList<Record<string, unknown>>(report.decision_roles);
+  const scenarioPaths = asObjectList<Record<string, unknown>>(report.scenario_paths);
+  const causalChains = asObjectList<Record<string, unknown>>(report.causal_chains);
+  const tianjiRiskAudit = asObjectList<Record<string, unknown>>(report.tianji_risk_audit);
+  const validationPlan = asObjectList<Record<string, unknown>>(report.validation_plan);
+  const contradictions = Array.isArray(report.contradictions)
+    ? report.contradictions.map(asText).filter(Boolean)
+    : [];
+  const assumptionStatus = asObjectList<Record<string, unknown>>(report.assumption_status);
+  const debateRounds = asObjectList<Record<string, unknown>>(report.debate_rounds);
+  const consensus = Array.isArray(report.consensus) ? report.consensus.map(asText).filter(Boolean) : [];
+  const disagreements = Array.isArray(report.disagreements)
+    ? report.disagreements.map(asText).filter(Boolean)
+    : [];
+  const archiveCandidates = Array.isArray(report.archive_candidates)
+    ? report.archive_candidates.map(asText).filter(Boolean)
+    : [];
 
   return (
     <Card className="flex min-w-0 flex-col overflow-hidden">
@@ -538,6 +573,7 @@ function ReportDetail({
           <span>方法论引用：<span className="text-[#172452]">{report.methodology_node_ids.length} 个节点</span></span>
           <span>引擎：<span className="text-[#172452]">{report.used_llm ? "LLM" : "本地回退"}</span></span>
           <span>报告深度：<span className="text-[#172452]">{report.report_depth || "consulting"}</span></span>
+          {report.algorithm_version && <span>推演算法：<span className="text-[#172452]">{report.algorithm_version}</span></span>}
         </div>
         {actionMsg && <p className="mt-3 text-[12px] font-semibold text-brand">{actionMsg}</p>}
       </div>
@@ -559,11 +595,27 @@ function ReportDetail({
 
         <ExecutiveSummarySection summary={executiveSummary} />
         <CoreTensionsSection items={coreTensions} />
+        <TianjiDecisionFrameSection
+          data={decisionFrame}
+          archiveCandidates={archiveCandidates}
+          reportId={report.id}
+          depositedSourceId={report.tianji_deposited_source_id ?? null}
+        />
+        <TianjiRolesSection items={decisionRoles} />
+        <TianjiDebateSection
+          rounds={debateRounds}
+          consensus={consensus}
+          disagreements={disagreements}
+          rolesDegraded={Boolean(report.roles_degraded)}
+          roleSimilarityMax={Number(report.role_similarity_max ?? 0)}
+        />
+        <TianjiScenarioSection items={scenarioPaths} />
+        <TianjiCausalSection items={causalChains} />
 
-        {/* 商业画布诊断 */}
+        {/* 九宫格/商业画布模块 */}
         {moduleEntries.length > 0 && (
           <>
-            <h3 className="mt-7 text-[15px] font-black text-ink">商业画布诊断</h3>
+            <h3 className="mt-7 text-[15px] font-black text-ink">九宫格/商业画布模块</h3>
             <div className="mt-4 space-y-3">
               {moduleEntries.map(([key, finding]) => (
                 <ModuleCard key={key} moduleKey={key} finding={finding} />
@@ -574,7 +626,10 @@ function ReportDetail({
 
         <CrossCanvasSection items={crossCanvasLogic} />
         <UnitEconomicsSection data={unitEconomics} />
+        <TianjiRiskAuditSection items={tianjiRiskAudit} />
+        <TianjiHistorySection contradictions={contradictions} assumptionStatus={assumptionStatus} />
         <RiskMatrixSection items={riskMatrix} />
+        <TianjiValidationPlanSection items={validationPlan} />
         <RoadmapSection items={mvpPath} />
         <NinetyDayPlanSection data={ninetyDayPlan} />
         <FinalRecommendationSection data={finalRecommendation} />
@@ -716,6 +771,224 @@ function CoreTensionsSection({ items }: { items: Record<string, unknown>[] }) {
   );
 }
 
+function TianjiDecisionFrameSection({
+  data,
+  archiveCandidates,
+  reportId,
+  depositedSourceId,
+}: {
+  data: Record<string, unknown>;
+  archiveCandidates: string[];
+  reportId: string;
+  depositedSourceId: string | null;
+}) {
+  const [depositing, setDepositing] = useState(false);
+  const [sourceId, setSourceId] = useState<string | null>(depositedSourceId);
+  const [depositMsg, setDepositMsg] = useState<string | null>(null);
+
+  if (Object.keys(data).length === 0 && archiveCandidates.length === 0) return null;
+
+  async function handleDeposit() {
+    if (depositing || sourceId) return;
+    setDepositing(true);
+    setDepositMsg(null);
+    try {
+      const result = await reportsApi.depositSimulation(reportId);
+      setSourceId(result.source_id);
+      setDepositMsg(result.message);
+    } catch (error) {
+      setDepositMsg(error instanceof ApiError ? error.message : "沉淀失败，请稍后重试");
+    } finally {
+      setDepositing(false);
+    }
+  }
+
+  return (
+    <RichCardSection title="天机问题框定" icon="target">
+      <div className="grid gap-3 lg:grid-cols-2">
+        <TextPanel label="决策目标" value={asText(data.decision_objective)} />
+        <TextPanel label="业务背景" value={asText(data.business_context)} />
+        <TextPanel label="目标客户" value={asText(data.target_customer)} />
+        <TextPanel label="当前核心问题" value={asText(data.current_problem)} />
+        <TextPanel label="期待输出" value={asText(data.expected_output)} />
+      </div>
+      <div className="mt-3 grid gap-3 lg:grid-cols-3">
+        <MiniList title="约束条件" tone="bg-blue-50 text-blue-600" items={asList(data.constraints)} />
+        <MiniList title="未验证假设" tone="bg-orange-50 text-orange-500" items={asList(data.unknown_assumptions)} />
+        <MiniList title="可沉淀资产" tone="bg-[#f0edff] text-brand" items={archiveCandidates} />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          disabled={depositing || Boolean(sourceId)}
+          onClick={handleDeposit}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-bold",
+            sourceId
+              ? "bg-emerald-50 text-emerald-600"
+              : "bg-[#f0edff] text-brand hover:bg-[#e6e1ff]",
+            depositing && "opacity-60"
+          )}
+        >
+          <Icon
+            name={sourceId ? "check" : "archive"}
+            className={cn("h-3.5 w-3.5", depositing && "animate-spin")}
+          />
+          {sourceId ? "已沉淀至候选池" : depositing ? "沉淀中..." : "沉淀推演资产到候选池"}
+        </button>
+        <span className="text-[11.5px] font-medium text-slate-400">
+          沉淀后进入人工审核，通过才会成为团队知识资产
+        </span>
+      </div>
+      {depositMsg && <p className="mt-2 text-[12px] font-semibold text-brand">{depositMsg}</p>}
+    </RichCardSection>
+  );
+}
+
+function TianjiRolesSection({ items }: { items: Record<string, unknown>[] }) {
+  if (items.length === 0) return null;
+  return (
+    <RichCardSection title="多角色决策推演" icon="users">
+      <div className="grid gap-3 lg:grid-cols-3">
+        {items.map((item, idx) => (
+          <div key={idx} className="rounded-xl border border-line bg-[#fbfcff] px-4 py-3">
+            <div className="text-[13px] font-black text-[#172452]">{asText(item.role)}</div>
+            <p className="mt-2 text-[12.5px] font-medium leading-6 text-[#3b4a6b]">{asText(item.lens)}</p>
+            <div className="mt-3 rounded-lg bg-white px-3 py-2 text-[12px] font-semibold leading-5 text-brand">
+              {asText(item.key_question)}
+            </div>
+            <div className="mt-3 grid gap-2">
+              <TextPanel label="可能立场" value={asText(item.likely_position)} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </RichCardSection>
+  );
+}
+
+function TianjiDebateSection({
+  rounds,
+  consensus,
+  disagreements,
+  rolesDegraded,
+  roleSimilarityMax,
+}: {
+  rounds: Record<string, unknown>[];
+  consensus: string[];
+  disagreements: string[];
+  rolesDegraded: boolean;
+  roleSimilarityMax: number;
+}) {
+  if (rounds.length === 0 && consensus.length === 0 && disagreements.length === 0 && !rolesDegraded) return null;
+  return (
+    <RichCardSection title="多轮角色辩论" icon="message">
+      {rolesDegraded && (
+        <div className="mb-3 rounded-xl border border-orange-100 bg-orange-50 px-4 py-3 text-[12.5px] font-bold leading-6 text-orange-600">
+          角色立场相似度偏高（{Math.round(roleSimilarityMax * 100)}%），本轮推演可能需要补充更多差异化证据。
+        </div>
+      )}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <MiniList title="形成共识" tone="bg-emerald-50 text-emerald-600" items={consensus} />
+        <MiniList title="保留分歧" tone="bg-rose-50 text-rose-500" items={disagreements} />
+      </div>
+      {rounds.length > 0 && (
+        <div className="mt-3 space-y-3">
+          {rounds.map((round, idx) => {
+            const positions = asObjectList<Record<string, unknown>>(round.positions);
+            return (
+              <div key={idx} className="rounded-xl bg-[#f8faff] px-4 py-3">
+                <div className="text-[12px] font-black text-brand">第 {asText(round.round_index) || idx + 1} 轮</div>
+                <div className="mt-2 grid gap-2 lg:grid-cols-2">
+                  {positions.map((position, positionIdx) => (
+                    <div key={positionIdx} className="rounded-lg bg-white px-3 py-2">
+                      <div className="text-[12.5px] font-black text-[#172452]">{asText(position.role)}</div>
+                      <p className="mt-1 text-[12px] font-medium leading-5 text-[#3b4a6b]">
+                        {asText(position.updated_position)}
+                      </p>
+                      <MiniList
+                        title="冲突点"
+                        tone="bg-orange-50 text-orange-500"
+                        items={asList(position.conflicts_with)}
+                        compact
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </RichCardSection>
+  );
+}
+
+function TianjiScenarioSection({ items }: { items: Record<string, unknown>[] }) {
+  if (items.length === 0) return null;
+  return (
+    <RichCardSection title="多路径走向推演" icon="route">
+      <div className="grid gap-3 lg:grid-cols-3">
+        {items.map((item, idx) => (
+          <div key={idx} className="rounded-xl border border-line bg-[#fbfcff] px-4 py-3">
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="text-[14px] font-black text-[#172452]">{asText(item.name)}</h4>
+              <span className="rounded-md bg-[#f0edff] px-2 py-0.5 text-[11px] font-bold text-brand">
+                {asText(item.path_type) || "路径"}
+              </span>
+            </div>
+            <p className="mt-2 text-[12.5px] font-medium leading-6 text-[#3b4a6b]">
+              {asText(item.description)}
+            </p>
+            <div className="mt-3 grid gap-2">
+              <TextPanel label="发生概率" value={asText(item.probability)} />
+              <TextPanel label="决策含义" value={asText(item.decision_implication)} />
+            </div>
+            <MiniList title="触发条件" tone="bg-orange-50 text-orange-500" items={asList(item.triggers)} compact />
+            <MiniList title="领先信号" tone="bg-blue-50 text-blue-600" items={asList(item.leading_indicators)} compact />
+          </div>
+        ))}
+      </div>
+    </RichCardSection>
+  );
+}
+
+function TianjiCausalSection({ items }: { items: Record<string, unknown>[] }) {
+  if (items.length === 0) return null;
+  return (
+    <RichCardSection title="画布模块交叉因果链" icon="git-branch">
+      <div className="space-y-3">
+        {items.map((item, idx) => (
+          <div key={idx} className="rounded-xl bg-[#f8faff] px-4 py-3">
+            <div className="flex flex-wrap gap-1.5">
+              {asText(item.chain)
+                .split(/→|->/)
+                .map((node) => node.trim())
+                .filter(Boolean)
+                .map((node, nodeIdx) => (
+                  <span key={`${node}-${nodeIdx}`} className="rounded-md bg-white px-2 py-1 text-[11px] font-bold text-brand">
+                    {node}
+                  </span>
+                ))}
+            </div>
+            <p className="mt-2 text-[12.5px] font-medium leading-6 text-[#3b4a6b]">{asText(item.explanation)}</p>
+            <p className="mt-2 text-[12.5px] font-bold leading-6 text-emerald-600">{asText(item.leverage_point)}</p>
+            {asList(item.affected_modules).length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {asList(item.affected_modules).map((m) => (
+                  <span key={m} className="rounded-md bg-white px-2 py-1 text-[11px] font-bold text-slate-500">
+                    {moduleLabel(m)}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </RichCardSection>
+  );
+}
+
 function CrossCanvasSection({ items }: { items: Record<string, unknown>[] }) {
   if (items.length === 0) return null;
   return (
@@ -766,6 +1039,102 @@ function RiskMatrixSection({ items }: { items: RiskRow[] }) {
             <span className="font-bold text-orange-500">{r.severity}</span>
             <span>{r.mitigation}</span>
             <span>{r.validation_method}</span>
+          </div>
+        ))}
+      </div>
+    </RichCardSection>
+  );
+}
+
+function TianjiRiskAuditSection({ items }: { items: Record<string, unknown>[] }) {
+  if (items.length === 0) return null;
+  return (
+    <RichCardSection title="天机风险审计" icon="shield">
+      <div className="grid gap-3 lg:grid-cols-2">
+        {items.map((item, idx) => (
+          <div key={idx} className="rounded-xl border border-orange-100 bg-orange-50/30 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <h4 className="text-[13px] font-black text-[#172452]">{asText(item.risk)}</h4>
+              {asText(item.severity) && (
+                <span className="rounded-md bg-white px-2 py-0.5 text-[11px] font-bold text-orange-500">
+                  {asText(item.severity)}
+                </span>
+              )}
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              <TextPanel label="早期信号" value={asText(item.early_signal)} />
+              <TextPanel label="缓释动作" value={asText(item.mitigation)} />
+              <TextPanel label="发生概率" value={asText(item.probability)} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </RichCardSection>
+  );
+}
+
+function TianjiHistorySection({
+  contradictions,
+  assumptionStatus,
+}: {
+  contradictions: string[];
+  assumptionStatus: Record<string, unknown>[];
+}) {
+  if (contradictions.length === 0 && assumptionStatus.length === 0) return null;
+  return (
+    <RichCardSection title="历史矛盾与假设追踪" icon="clipboard-check">
+      <div className="grid gap-3 lg:grid-cols-2">
+        <MiniList title="历史矛盾" tone="bg-rose-50 text-rose-500" items={contradictions} />
+        {assumptionStatus.length > 0 && (
+          <div className="rounded-xl bg-[#fbfcff] px-3 py-3">
+            <div className="inline-flex rounded-md bg-blue-50 px-2 py-1 text-[11px] font-black text-blue-600">
+              假设状态
+            </div>
+            <div className="mt-2 space-y-2">
+              {assumptionStatus.map((item, idx) => (
+                <div key={idx} className="rounded-lg bg-white px-3 py-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-md bg-[#f0edff] px-2 py-0.5 text-[11px] font-bold text-brand">
+                      {asText(item.status) || "unknown"}
+                    </span>
+                    <span className="text-[12.5px] font-bold leading-5 text-[#172452]">
+                      {asText(item.assumption)}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[12px] font-medium leading-5 text-slate-500">
+                    {asText(item.evidence)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </RichCardSection>
+  );
+}
+
+function TianjiValidationPlanSection({ items }: { items: Record<string, unknown>[] }) {
+  if (items.length === 0) return null;
+  return (
+    <RichCardSection title="天机验证计划" icon="file-check">
+      <div className="grid gap-3 lg:grid-cols-3">
+        {items.map((item, idx) => (
+          <div key={idx} className="rounded-xl border border-line bg-[#fbfcff] px-4 py-3">
+            <div className="flex items-center gap-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#f0edff] text-[11px] font-black text-brand">
+                {idx + 1}
+              </span>
+              <h4 className="text-[13px] font-black text-[#172452]">{asText(item.step)}</h4>
+            </div>
+            <p className="mt-2 text-[12.5px] font-medium leading-6 text-[#3b4a6b]">
+              {asText(item.objective)}
+            </p>
+            <div className="mt-3 space-y-2">
+              <TextPanel label="执行动作" value={asText(item.action)} />
+              <TextPanel label="成功标准" value={asText(item.success_criteria)} />
+              <TextPanel label="验证周期" value={asText(item.duration)} />
+            </div>
           </div>
         ))}
       </div>

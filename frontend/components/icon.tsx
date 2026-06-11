@@ -73,6 +73,7 @@ import {
   Upload,
   RotateCcw,
   LogOut,
+  MessageSquare,
   type LucideIcon,
 } from "lucide-react";
 
@@ -151,6 +152,7 @@ const map: Record<string, LucideIcon> = {
   upload: Upload,
   "rotate-ccw": RotateCcw,
   logout: LogOut,
+  message: MessageSquare,
 };
 
 export function Icon({

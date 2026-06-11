@@ -10,6 +10,8 @@ from app.db.models.assistant import (
 )
 from app.db.models.diagnosis import DiagnosisReport, ReportQualityCheck
 from app.db.models.feedback import Feedback
+from app.db.models.project import Project
+from app.db.models.validation import ValidationCard
 from app.db.models.expansion import (
     ExpansionChunk,
     ExpansionItem,
@@ -52,4 +54,6 @@ __all__ = [
     "DiagnosisReport",
     "ReportQualityCheck",
     "Feedback",
+    "Project",
+    "ValidationCard",
 ]

@@ -8,6 +8,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.schemas.tianji import TianjiSimulationResult
+
 
 class AssistantAttachment(BaseModel):
     name: str
@@ -26,6 +28,7 @@ class AssistantAskRequest(BaseModel):
     question: str = Field(..., min_length=1)
     company_context: str | None = None
     conversation_id: str | None = None
+    project_id: str | None = None
     attachments: list[AssistantAttachment] = Field(default_factory=list)
 
 
@@ -65,10 +68,13 @@ class AssistantDepositFileResponse(BaseModel):
 
 
 class AssistantDepositMessageRequest(BaseModel):
-    """把助手回答沉淀为正式资料，并进入扩展审核流程。"""
+    """把助手回答沉淀为正式资料，并进入扩展审核流程。
+
+    source_type 不传时由后端推断：消息含天机推演结果 → tianji_simulation，否则 practice_feedback。
+    """
 
     title: str | None = None
-    source_type: str = "practice_feedback"
+    source_type: str | None = None
     visibility: str = "team"
     auto_absorb: bool = True
 
@@ -103,6 +109,7 @@ class AssistantAskResponse(BaseModel):
     action_href: str | None = None
     node_refs: list[AssistantNodeRef] = Field(default_factory=list)
     suggested_questions: list[str] = Field(default_factory=list)
+    tianji_simulation: TianjiSimulationResult | None = None
 
 
 class AssistantConversationCreate(BaseModel):
@@ -126,6 +133,7 @@ class AssistantMessageOut(BaseModel):
     attachments: list[AssistantAttachment] = Field(default_factory=list)
     node_refs: list[AssistantNodeRef] = Field(default_factory=list)
     suggested_questions: list[str] = Field(default_factory=list)
+    tianji_simulation: TianjiSimulationResult | None = None
     used_llm: bool = False
     action_label: str | None = None
     action_href: str | None = None

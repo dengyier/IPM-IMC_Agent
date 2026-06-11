@@ -30,6 +30,7 @@ from app.db.models import (
     AssistantMessage,
     ExpansionItem,
     ExpansionSource,
+    Project,
     ReviewTask,
 )
 from app.db.models.auth import AuthUser
@@ -49,9 +50,11 @@ from app.schemas.assistant import (
     AssistantParseFileResponse,
 )
 from app.services.assistant_service import AssistantService
+from app.services.deposit_service import deposit_text_source
 from app.services.document_parser import chunk_pages, clean_text, parse_document_pages
 from app.services.embeddings import EmbeddingProvider
 from app.services.llm import LLMService
+from app.services import project_service
 from app.services.vector_store import VectorStore
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
@@ -170,6 +173,7 @@ def _to_message_out(
         attachments=attachments,
         node_refs=message.node_refs or [],
         suggested_questions=message.suggested_questions or [],
+        tianji_simulation=message.tianji_simulation or None,
         used_llm=message.used_llm,
         action_label=message.action_label,
         action_href=message.action_href,
@@ -208,6 +212,37 @@ def _conversation_history_for_llm(
                 content = f"{content}\n随问题上传文件：{attachment_names}"
         history.append({"role": row.role, "content": content})
     return history
+
+
+def _project_context_for_assistant(
+    db: Session,
+    project_id: str | None,
+    tid: str | None,
+) -> str:
+    if not project_id:
+        return ""
+    project = db.get(Project, project_id)
+    if not project:
+        return ""
+    if tid is not None and project.tenant_id != tid:
+        return ""
+    parts = [
+        f"项目名称：{project.name}",
+        f"行业：{project.industry or '未填写'}",
+        f"目标客户：{project.target_customer or '未填写'}",
+        f"当前核心问题：{project.current_problem or '未填写'}",
+        f"任务包：{project.task_pack}",
+        f"项目状态：{project.status}",
+    ]
+    history = project_service.history_context(db, project_id)
+    if history:
+        parts.extend(["", "项目历史上下文：", history])
+    return "\n".join(parts)
+
+
+def _merge_context(*parts: str | None) -> str | None:
+    text = "\n\n".join(part.strip() for part in parts if part and part.strip())
+    return text or None
 
 
 def _attachment_file_ids(attachments: list[AssistantAttachment]) -> list[str]:
@@ -507,6 +542,32 @@ def _assistant_message_as_deposit_text(
                 lines.append(f"- {str(question).strip()}")
         lines.append("")
 
+    simulation = assistant_message.tianji_simulation or {}
+    if isinstance(simulation, dict) and simulation:
+        candidates = [
+            str(c).strip()
+            for c in simulation.get("archive_candidates") or []
+            if str(c).strip()
+        ]
+        if candidates:
+            lines.extend(["## 天机推演·可沉淀资产", "", *[f"- {c}" for c in candidates], ""])
+        path_lines = []
+        for path in simulation.get("scenario_paths") or []:
+            if isinstance(path, dict) and str(path.get("name") or "").strip():
+                conclusion = str(
+                    path.get("decision_implication") or path.get("description") or ""
+                ).strip()
+                path_lines.append(f"- {path['name']}：{conclusion}")
+        if path_lines:
+            lines.extend(["## 天机推演·路径结论", "", *path_lines, ""])
+        step_lines = []
+        for step in simulation.get("validation_plan") or []:
+            if isinstance(step, dict) and str(step.get("step") or "").strip():
+                criteria = str(step.get("success_criteria") or "").strip()
+                step_lines.append(f"- {step['step']}：{criteria}")
+        if step_lines:
+            lines.extend(["## 天机推演·验证计划", "", *step_lines, ""])
+
     return "\n".join(lines).strip() + "\n"
 
 
@@ -624,11 +685,17 @@ def ask(
         attachments=payload.attachments,
         tenant_id=tenant_scope(user),
     )
+    project_context = _project_context_for_assistant(
+        db, payload.project_id, tenant_scope(user)
+    )
+    project_history = project_service.history_context(db, payload.project_id) if payload.project_id else ""
     response = AssistantService(db, embeddings, core_store, llm).ask(
         question=payload.question,
-        company_context=payload.company_context,
+        company_context=_merge_context(payload.company_context, project_context),
         file_context=file_context,
         conversation_history=_conversation_history_for_llm(db, conversation.id),
+        project_history=project_history,
+        project_id=payload.project_id,
         tenant_id=tid,
     )
     response.conversation_id = conversation.id
@@ -646,6 +713,11 @@ def ask(
         content=response.answer,
         node_refs=[node.model_dump(mode="json") for node in response.node_refs],
         suggested_questions=response.suggested_questions,
+        tianji_simulation=(
+            response.tianji_simulation.model_dump(mode="json")
+            if response.tianji_simulation
+            else None
+        ),
         used_llm=response.used_llm,
         action_label=response.action_label,
         action_href=response.action_href,
@@ -962,63 +1034,39 @@ def deposit_message_to_expansion(
     user_message = _previous_user_message(db, assistant_message)
     title = _message_source_title(conversation, user_message, assistant_message, payload.title)
 
-    settings = get_settings()
-    deposit_dir = Path(settings.storage_dir) / "assistant-message-deposits"
-    deposit_dir.mkdir(parents=True, exist_ok=True)
-    safe_title = re.sub(r"[^0-9A-Za-z._\-\u4e00-\u9fff]+", "_", title).strip("_")[:80]
-    if not safe_title:
-        safe_title = "assistant-message"
-    deposit_path = deposit_dir / f"{assistant_message.id}_{safe_title}.md"
-    deposit_path.write_text(
-        _assistant_message_as_deposit_text(conversation, assistant_message, user_message),
-        encoding="utf-8",
+    has_simulation = bool(assistant_message.tianji_simulation)
+    source_type = payload.source_type or (
+        "tianji_simulation" if has_simulation else "practice_feedback"
     )
-
-    source = ExpansionSource(
-        tenant_id=assistant_message.tenant_id,
-        title=title,
-        source_type=payload.source_type or "practice_feedback",
-        file_path=str(deposit_path),
-        submitted_by=user.phone,
-        source_layer="expansion",
-        visibility=payload.visibility or "team",
-        status="uploaded",
-        meta={
-            "deposited_from": "assistant_message",
-            "assistant_message_id": assistant_message.id,
-            "assistant_conversation_id": assistant_message.conversation_id,
-            "user_message_id": user_message.id if user_message else None,
-            "used_llm": assistant_message.used_llm,
-            "node_ref_count": len(assistant_message.node_refs or []),
-        },
-    )
-    db.add(source)
-    db.commit()
-    db.refresh(source)
-
-    chunk_count = 0
-    embedded_count = 0
-    item_count = 0
-    review_task_count = 0
-    vector_backend = expansion_store.backend
-    status = source.status
-    if payload.auto_absorb:
-        try:
-            result = ExternalInfoEvolutionGraph(
-                db=db,
-                settings=settings,
-                embeddings=embeddings,
-                expansion_store=expansion_store,
-                llm=llm,
-            ).run_absorb(source)
-            chunk_count = result.chunk_count
-            embedded_count = result.embedded_count
-            item_count = result.item_count
-            review_task_count = result.review_task_count
-            vector_backend = result.vector_backend
-            status = result.status
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        deposit = deposit_text_source(
+            db,
+            get_settings(),
+            embeddings,
+            expansion_store,
+            llm,
+            title=title,
+            text=_assistant_message_as_deposit_text(conversation, assistant_message, user_message),
+            source_type=source_type,
+            submitted_by=user.phone,
+            tenant_id=assistant_message.tenant_id,
+            file_stub=assistant_message.id,
+            subdir="assistant-message-deposits",
+            visibility=payload.visibility or "team",
+            meta={
+                "deposited_from": "assistant_message",
+                "assistant_message_id": assistant_message.id,
+                "assistant_conversation_id": assistant_message.conversation_id,
+                "user_message_id": user_message.id if user_message else None,
+                "used_llm": assistant_message.used_llm,
+                "node_ref_count": len(assistant_message.node_refs or []),
+                "has_tianji_simulation": has_simulation,
+            },
+            auto_absorb=payload.auto_absorb,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    source = deposit.source
 
     assistant_message.deposited_source_id = source.id
     assistant_message.deposited_at = utc_now()
@@ -1029,11 +1077,15 @@ def deposit_message_to_expansion(
         message_id=assistant_message.id,
         source_id=source.id,
         title=source.title,
-        status=status,
-        chunk_count=chunk_count,
-        embedded_count=embedded_count,
-        item_count=item_count,
-        review_task_count=review_task_count,
-        vector_backend=vector_backend,
-        message="已将对话结果沉淀为正式资料，并进入人工审核流程。",
+        status=deposit.status,
+        chunk_count=deposit.chunk_count,
+        embedded_count=deposit.embedded_count,
+        item_count=deposit.item_count,
+        review_task_count=deposit.review_task_count,
+        vector_backend=deposit.vector_backend,
+        message=(
+            "已将对话结果（含天机推演资产）沉淀为候选资料，并进入人工审核流程。"
+            if has_simulation
+            else "已将对话结果沉淀为正式资料，并进入人工审核流程。"
+        ),
     )

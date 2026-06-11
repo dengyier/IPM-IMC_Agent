@@ -75,9 +75,9 @@ export const stats: Stat[] = [
 export const suggestionChips = [
   "分析一下这个项目的主要风险",
   "判断价值主张是否成立",
-  "生成一份商业画布报告",
-  "有些同学笔记需要审核",
-  "评估这个方案的可行性",
+  "为这个项目设计 7 天验证计划",
+  "从客户、渠道、成本三方推演一下",
+  "生成一份项目验证诊断报告",
 ];
 
 export interface TodoItem {
@@ -109,58 +109,37 @@ export const recentReports: ReportRow[] = [
 ];
 
 export const quickActions = [
-  { icon: "list-tree", label: "知识节点库", href: "/knowledge-nodes" },
-  { icon: "layout-grid", label: "商业画布诊断", href: "/canvas-diagnosis" },
-  { icon: "git-branch", label: "知识扩展", href: "/note-evolution" },
+  { icon: "message", label: "AI经营访谈", href: "/chat" },
+  { icon: "layout-grid", label: "项目验证诊断", href: "/canvas-diagnosis" },
+  { icon: "archive", label: "经营档案", href: "/portfolio" },
+  { icon: "folder", label: "资料中心", href: "/data-center" },
   { icon: "users", label: "人工审核台", href: "/review" },
   { icon: "file-bar-chart", label: "诊断报告中心", href: "/reports" },
-  { icon: "file-plus", label: "新建报告", href: "/canvas-diagnosis" },
-  { icon: "gauge", label: "数据看板", href: "/data-dashboard" },
 ];
 
 export const assistantSkills = [
   "知识检索与问答",
-  "商业画布诊断分析",
-  "生成报告与可视化",
-  "风险识别与评估",
-  "数据分析与洞察",
+  "项目验证诊断",
+  "多角色决策推演",
+  "风险审计与验证计划",
+  "经营档案沉淀",
 ];
 
 export const assistantPrompts = [
   { icon: "help-circle", label: "这个项目的核心问题是什么？" },
   { icon: "target", label: "价值主张是否匹配客户需求？" },
-  { icon: "swords", label: "帮我分析下竞争对手的优势" },
-  { icon: "file-text", label: "生成一份商业画布报告" },
+  { icon: "swords", label: "从客户、渠道、成本三方推演一下" },
+  { icon: "file-text", label: "生成一份项目验证诊断报告" },
 ];
 
 export const navItems: GuardedNavItem[] = [
-  { key: "home", icon: "home", label: "工作台首页", href: "/" },
-  // 资料中心仅超管可见：承担核心方法论上传/解析/建底座。非超管的外部资料管理统一在「知识扩展」页。
-  {
-    key: "data-center",
-    icon: "folder",
-    label: "资料中心",
-    href: "/data-center",
-    requiresSuperAdmin: true,
-  },
-  {
-    key: "knowledge",
-    icon: "list-tree",
-    label: "知识节点库",
-    href: "/knowledge-nodes",
-    requiresSuperAdmin: true,
-  },
-  { key: "canvas", icon: "layout-grid", label: "商业画布诊断", href: "/canvas-diagnosis" },
-  { key: "notes", icon: "git-branch", label: "知识扩展", href: "/note-evolution" },
-  { key: "review", icon: "users", label: "人工审核台", href: "/review", requiresReview: true },
+  { key: "home", icon: "home", label: "经营工作台", href: "/" },
+  { key: "interview", icon: "message", label: "AI经营访谈", href: "/chat" },
+  { key: "canvas", icon: "layout-grid", label: "项目验证诊断", href: "/canvas-diagnosis" },
   { key: "reports", icon: "file-bar-chart", label: "诊断报告中心", href: "/reports" },
-  {
-    key: "feedback",
-    icon: "help-circle",
-    label: "反馈管理",
-    href: "/feedback",
-    requiresSuperAdmin: true,
-  },
+  { key: "portfolio", icon: "archive", label: "经营档案", href: "/portfolio" },
+  { key: "data-center", icon: "folder", label: "资料中心", href: "/data-center" },
+  { key: "review", icon: "users", label: "人工审核台", href: "/review", requiresReview: true },
   { key: "settings", icon: "settings", label: "系统设置", href: "/settings" },
 ];
 

@@ -46,3 +46,20 @@ class RecentReviewTask(BaseModel):
     task_type: str
     status: str
     created_at: str | None = None
+
+
+class TianjiMetrics(BaseModel):
+    days: int = 30
+    reports: int = 0
+    validation_card_count: int = 0
+    validation_generated_rate: float = 0.0
+    validation_feedback_rate: float = 0.0
+    report_generation_rate: float = 0.0
+    project_revisit_rate: float = 0.0
+    knowledge_node_reference_rate: float = 0.0
+    multi_path_coverage_rate: float = 0.0
+    avg_graph_expanded_nodes: float = 0.0
+    avg_role_count: float = 0.0
+    roles_degraded_count: int = 0
+    tianji_deposit_count: int = 0
+    tianji_deposit_approval_rate: float = 0.0

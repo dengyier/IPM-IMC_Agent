@@ -190,6 +190,23 @@ export interface DashboardSummary {
   system_status: SystemStatus;
 }
 
+export interface TianjiMetrics {
+  days: number;
+  reports: number;
+  validation_card_count: number;
+  validation_generated_rate: number;
+  validation_feedback_rate: number;
+  report_generation_rate: number;
+  project_revisit_rate: number;
+  knowledge_node_reference_rate: number;
+  multi_path_coverage_rate: number;
+  avg_graph_expanded_nodes: number;
+  avg_role_count: number;
+  roles_degraded_count: number;
+  tianji_deposit_count: number;
+  tianji_deposit_approval_rate: number;
+}
+
 export interface RecentReport {
   id: string;
   title: string;
@@ -218,6 +235,8 @@ export const dashboardApi = {
     api.get<RecentReport[]>(`/api/dashboard/recent-reports?limit=${limit}`),
   recentReviewTasks: (limit = 8) =>
     api.get<RecentReviewTask[]>(`/api/dashboard/recent-review-tasks?limit=${limit}`),
+  tianjiMetrics: (days = 30) =>
+    api.get<TianjiMetrics>(`/api/dashboard/tianji-metrics?days=${days}`),
 };
 
 // ---- 认证 / 手机验证码登录 ----
@@ -324,6 +343,107 @@ export interface AssistantAttachment {
   truncated?: boolean;
 }
 
+export interface TianjiDecisionFrame {
+  decision_objective?: string;
+  business_context?: string;
+  target_customer?: string;
+  current_problem?: string;
+  constraints?: string[];
+  unknown_assumptions?: string[];
+  expected_output?: string;
+}
+
+export interface TianjiEvidenceRef {
+  type: string;
+  ref: string;
+  node_id?: string | null;
+  summary?: string;
+  score?: number | null;
+}
+
+export interface TianjiDecisionRole {
+  role: string;
+  lens?: string;
+  key_question?: string;
+  likely_position?: string;
+  evidence_focus?: string[];
+}
+
+export interface TianjiScenarioPath {
+  name: string;
+  path_type?: string;
+  description?: string;
+  triggers?: string[];
+  leading_indicators?: string[];
+  decision_implication?: string;
+  probability?: string;
+}
+
+export interface TianjiCausalChain {
+  chain: string;
+  explanation?: string;
+  affected_modules?: string[];
+  leverage_point?: string;
+}
+
+export interface TianjiRiskAuditItem {
+  risk: string;
+  severity?: string;
+  probability?: string;
+  early_signal?: string;
+  mitigation?: string;
+}
+
+export interface TianjiValidationStep {
+  step: string;
+  objective?: string;
+  action?: string;
+  success_criteria?: string;
+  duration?: string;
+}
+
+export interface TianjiAssumptionStatus {
+  assumption: string;
+  status?: string;
+  evidence?: string;
+}
+
+export interface TianjiDebatePosition {
+  role: string;
+  updated_position?: string;
+  conflicts_with?: string[];
+}
+
+export interface TianjiDebateRound {
+  round_index: number;
+  positions: TianjiDebatePosition[];
+  converged?: boolean;
+}
+
+export interface TianjiSimulationResult {
+  algorithm_version: string;
+  mode: string;
+  generated_at?: string;
+  confidence?: number;
+  decision_frame: TianjiDecisionFrame;
+  evidence_refs: TianjiEvidenceRef[];
+  decision_roles: TianjiDecisionRole[];
+  scenario_paths: TianjiScenarioPath[];
+  causal_chains: TianjiCausalChain[];
+  risk_audit: TianjiRiskAuditItem[];
+  validation_plan: TianjiValidationStep[];
+  contradictions: string[];
+  assumption_status: TianjiAssumptionStatus[];
+  roles_degraded: boolean;
+  role_similarity_max: number;
+  debate_rounds: TianjiDebateRound[];
+  consensus: string[];
+  disagreements: string[];
+  archive_candidates: string[];
+  missing_information: string[];
+  used_llm: boolean;
+}
+
 export interface AssistantAskResponse {
   conversation_id: string;
   assistant_message_id: string | null;
@@ -334,6 +454,7 @@ export interface AssistantAskResponse {
   action_href: string | null;
   node_refs: AssistantNodeRef[];
   suggested_questions: string[];
+  tianji_simulation?: TianjiSimulationResult | null;
 }
 
 export interface AssistantMessageRecord {
@@ -350,6 +471,7 @@ export interface AssistantMessageRecord {
   item_count?: number | null;
   review_task_count?: number | null;
   source_status?: string | null;
+  tianji_simulation?: TianjiSimulationResult | null;
   created_at: string;
 }
 
@@ -423,14 +545,142 @@ export const assistantApi = {
     question: string,
     companyContext?: string,
     conversationId?: string | null,
-    attachments?: AssistantAttachment[]
+    attachments?: AssistantAttachment[],
+    projectId?: string | null
   ) =>
     api.post<AssistantAskResponse>("/api/assistant/ask", {
       question,
       company_context: companyContext,
       conversation_id: conversationId || undefined,
       attachments: attachments && attachments.length > 0 ? attachments : undefined,
+      project_id: projectId || undefined,
     }),
+};
+
+// ---- 经营档案 / 项目 ----
+
+export type ProjectTaskPack = "new_project" | "sales_growth" | "ai_acquisition" | "review";
+export type ProjectStatus = "idea" | "validating" | "trial" | "growth" | "paused";
+
+export interface Project {
+  id: string;
+  name: string;
+  industry: string | null;
+  target_customer: string;
+  current_problem: string;
+  task_pack: ProjectTaskPack;
+  status: ProjectStatus;
+  risk_profile: Record<string, unknown>;
+  tenant_id: string | null;
+  created_at: string;
+  updated_at: string;
+  report_count: number;
+  last_diagnosed_at: string | null;
+}
+
+export interface ProjectCreateRequest {
+  name: string;
+  industry?: string | null;
+  target_customer?: string;
+  current_problem?: string;
+  task_pack?: ProjectTaskPack;
+}
+
+export type ProjectUpdateRequest = Partial<
+  Pick<Project, "name" | "industry" | "target_customer" | "current_problem" | "status">
+>;
+
+export const projectApi = {
+  list: () => api.get<Project[]>("/api/projects"),
+  detail: (id: string) => api.get<Project>(`/api/projects/${id}`),
+  create: (payload: ProjectCreateRequest) => api.post<Project>("/api/projects", payload),
+  update: (id: string, payload: ProjectUpdateRequest) =>
+    api.patch<Project>(`/api/projects/${id}`, payload),
+  remove: (id: string) => api.del<void>(`/api/projects/${id}`),
+};
+
+// ---- 验证卡（AI 回答 / 诊断结论 → 可执行验证计划）----
+
+export type ValidationStatus = "draft" | "running" | "completed" | "archived";
+
+export interface ValidationAction {
+  title: string;
+  objective: string;
+  steps: string[];
+  success_metric: string;
+  owner?: string | null;
+  day_range: string;
+}
+
+export interface ValidationDecisionCriteria {
+  continue_when: string;
+  adjust_when: string;
+  pause_when: string;
+}
+
+export interface ValidationCard {
+  id: string;
+  tenant_id: string | null;
+  user_id: string | null;
+  project_id: string | null;
+  conversation_id: string | null;
+  source_message_id: string | null;
+  title: string;
+  project_summary: string;
+  core_judgment: string;
+  biggest_uncertainty: string;
+  target_customer: string;
+  failure_reason: string;
+  actions: ValidationAction[];
+  decision_criteria: ValidationDecisionCriteria;
+  result?: "achieved" | "not_achieved" | "partially_achieved" | null;
+  actual_outcome: string;
+  learnings: string;
+  validated_at?: string | null;
+  node_refs: Record<string, unknown>[];
+  meta: Record<string, unknown>;
+  status: ValidationStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ValidationCardCreateRequest {
+  project_id?: string | null;
+  conversation_id?: string | null;
+  source_message_id?: string | null;
+  title?: string | null;
+  project_description?: string | null;
+  target_customer?: string | null;
+}
+
+export const validationCardApi = {
+  list: (params?: { projectId?: string; status?: ValidationStatus }) => {
+    const qs = new URLSearchParams();
+    if (params?.projectId) qs.set("project_id", params.projectId);
+    if (params?.status) qs.set("status", params.status);
+    const query = qs.toString();
+    return api.get<ValidationCard[]>(`/api/validation-cards${query ? `?${query}` : ""}`);
+  },
+  detail: (id: string) => api.get<ValidationCard>(`/api/validation-cards/${id}`),
+  create: (payload: ValidationCardCreateRequest) =>
+    api.post<ValidationCard>("/api/validation-cards", payload),
+  update: (
+    id: string,
+    payload: Partial<
+      Pick<
+        ValidationCard,
+        | "title"
+        | "status"
+        | "actions"
+        | "decision_criteria"
+        | "result"
+        | "actual_outcome"
+        | "learnings"
+        | "validated_at"
+      >
+    >
+  ) =>
+    api.patch<ValidationCard>(`/api/validation-cards/${id}`, payload),
 };
 
 // ---- 系统健康 / 连接测试 / 只读配置 ----
@@ -858,10 +1108,11 @@ export const reviewApi = {
   }) => api.post<BulkReviewDecisionResult>("/api/review/tasks/bulk-decide", payload),
 };
 
-// ---- 诊断报告（商业画布诊断产出）----
+// ---- 诊断报告（项目验证诊断产出）----
 
 export interface DiagnosisReport {
   id: string;
+  project_id: string | null;
   title: string;
   company_name: string | null;
   question: string;
@@ -877,6 +1128,22 @@ export interface DiagnosisReport {
   mvp_validation_path: Record<string, unknown>[];
   ninety_day_plan: Record<string, unknown>;
   final_recommendation: Record<string, unknown>;
+  decision_frame: Record<string, unknown>;
+  decision_roles: Record<string, unknown>[];
+  scenario_paths: Record<string, unknown>[];
+  causal_chains: Record<string, unknown>[];
+  tianji_risk_audit: Record<string, unknown>[];
+  validation_plan: Record<string, unknown>[];
+  contradictions?: string[];
+  assumption_status?: Record<string, unknown>[];
+  roles_degraded?: boolean;
+  role_similarity_max?: number;
+  debate_rounds?: Record<string, unknown>[];
+  consensus?: string[];
+  disagreements?: string[];
+  archive_candidates: unknown[];
+  algorithm_version: string | null;
+  tianji_deposited_source_id?: string | null;
   key_assumptions: string[];
   risks: string[];
   recommended_actions: string[];
@@ -915,6 +1182,8 @@ export interface DiagnoseRequest {
   company_name?: string | null;
   report_depth?: "basic" | "standard" | "consulting";
   canvas: Record<string, string>;
+  project_id?: string | null;
+  task_pack?: ProjectTaskPack;
 }
 
 export const diagnosisApi = {
@@ -922,11 +1191,24 @@ export const diagnosisApi = {
   create: (req: DiagnoseRequest) => api.post<TaskCreated>("/api/diagnosis/diagnose", req),
 };
 
+export interface ReportDepositSimulationResult {
+  report_id: string;
+  source_id: string;
+  title: string;
+  status: string;
+  item_count: number;
+  review_task_count: number;
+  message: string;
+}
+
 export const reportsApi = {
   list: () => api.get<DiagnosisReport[]>("/api/diagnosis/reports"),
   detail: (id: string) => api.get<DiagnosisReport>(`/api/diagnosis/reports/${id}`),
   quality: (id: string) =>
     api.get<QualityCheck>(`/api/diagnosis/reports/${id}/quality`),
+  // 把报告的天机推演资产沉淀为候选资料（进入人工审核，幂等）
+  depositSimulation: (id: string) =>
+    api.post<ReportDepositSimulationResult>(`/api/diagnosis/reports/${id}/deposit-simulation`, {}),
   // 异步：返回 task_id，用 pollTask<DiagnoseResult> 轮询，结果含新 report
   regenerate: (id: string) =>
     api.post<TaskCreated>(`/api/diagnosis/reports/${id}/regenerate`),

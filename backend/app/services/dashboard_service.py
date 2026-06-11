@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    AgentRun,
     DiagnosisReport,
     ExpansionItem,
     ExpansionSource,
@@ -14,14 +17,18 @@ from app.db.models import (
     MethodologyNode,
     MethodologySource,
     ProblemRoutingRule,
+    Project,
     ReviewTask,
+    ValidationCard,
 )
+from app.db.base import utc_now
 from app.schemas.dashboard import (
     DashboardSummary,
     PendingItem,
     RecentReport,
     RecentReviewTask,
     SystemStatus,
+    TianjiMetrics,
 )
 from app.services.llm import LLMService
 from app.services.vector_store import VectorStore
@@ -166,3 +173,75 @@ class DashboardService:
             )
             for t in rows
         ]
+
+    def tianji_metrics(self, days: int = 30) -> TianjiMetrics:
+        since = utc_now() - timedelta(days=max(days, 1))
+        report_q = self.db.query(DiagnosisReport).filter(DiagnosisReport.created_at >= since)
+        card_q = self.db.query(ValidationCard).filter(ValidationCard.created_at >= since)
+        source_q = self.db.query(ExpansionSource).filter(
+            ExpansionSource.source_type == "tianji_simulation",
+            ExpansionSource.created_at >= since,
+        )
+        run_q = self.db.query(AgentRun).filter(
+            AgentRun.graph_name == "business_canvas_diagnosis",
+            AgentRun.created_at >= since,
+        )
+        project_q = self.db.query(Project)
+        if self.tenant_id is not None:
+            report_q = report_q.filter(DiagnosisReport.tenant_id == self.tenant_id)
+            card_q = card_q.filter(ValidationCard.tenant_id == self.tenant_id)
+            source_q = source_q.filter(ExpansionSource.tenant_id == self.tenant_id)
+            run_q = run_q.filter(AgentRun.tenant_id == self.tenant_id)
+            project_q = project_q.filter(Project.tenant_id == self.tenant_id)
+
+        reports = report_q.all()
+        cards = card_q.all()
+        sources = source_q.all()
+        runs = run_q.all()
+        report_count = len(reports)
+        card_count = len(cards)
+        feedback_count = len([card for card in cards if getattr(card, "result", None)])
+
+        project_report_counts: dict[str, int] = {}
+        for report in reports:
+            if report.project_id:
+                project_report_counts[report.project_id] = project_report_counts.get(report.project_id, 0) + 1
+        projects_with_reports = len(project_report_counts)
+        revisited_projects = len([count for count in project_report_counts.values() if count >= 2])
+        project_count = project_q.count() or 0
+
+        multi_path_count = len([r for r in reports if len(r.scenario_paths or []) >= 2])
+        node_ref_total = sum(len(r.methodology_node_ids or []) for r in reports)
+
+        metric_rows = [
+            run.output.get("metrics", {})
+            for run in runs
+            if isinstance(run.output, dict) and isinstance(run.output.get("metrics"), dict)
+        ]
+        graph_total = sum(float(row.get("graph_expanded") or 0) for row in metric_rows)
+        role_total = sum(float(row.get("roles") or 0) for row in metric_rows)
+        roles_degraded_count = sum(1 for row in metric_rows if row.get("roles_degraded"))
+        deposit_approved = len([s for s in sources if s.status in {"absorbed", "approved", "processed"}])
+
+        return TianjiMetrics(
+            days=days,
+            reports=report_count,
+            validation_card_count=card_count,
+            validation_generated_rate=_rate(card_count, report_count),
+            validation_feedback_rate=_rate(feedback_count, card_count),
+            report_generation_rate=_rate(report_count, project_count),
+            project_revisit_rate=_rate(revisited_projects, projects_with_reports),
+            knowledge_node_reference_rate=round(node_ref_total / report_count, 4) if report_count else 0.0,
+            multi_path_coverage_rate=_rate(multi_path_count, report_count),
+            avg_graph_expanded_nodes=round(graph_total / len(metric_rows), 4) if metric_rows else 0.0,
+            avg_role_count=round(role_total / len(metric_rows), 4) if metric_rows else 0.0,
+            roles_degraded_count=roles_degraded_count,
+            tianji_deposit_count=len(sources),
+            tianji_deposit_approval_rate=_rate(deposit_approved, len(sources)),
+        )
+
+
+def _rate(numerator: int | float, denominator: int | float) -> float:
+    if not denominator:
+        return 0.0
+    return round(float(numerator) / float(denominator), 4)

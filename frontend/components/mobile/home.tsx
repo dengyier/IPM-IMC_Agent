@@ -69,7 +69,7 @@ export function MobileHome() {
       {/* 顶部条（左侧给 Sidebar 汉堡按钮留位） */}
       <header className="flex h-14 shrink-0 items-center gap-2 px-4">
         <div className="min-w-0 flex-1 truncate text-center text-[15px] font-black text-ink">
-          天机AI 商业决策智能体
+          经营工作台
         </div>
         <a
           href="/chat"
@@ -94,7 +94,7 @@ export function MobileHome() {
             你好，{user?.display_name || "用户"} <span className="text-[20px]">👋</span>
           </h1>
           <p className="mt-1.5 text-[13px] text-slate-500">
-            欢迎回来！我是你的商业决策智能体，随时为你提供洞察与建议。
+            查看项目验证、诊断报告与知识资产进展；需要深聊时进入 AI 经营访谈。
           </p>
         </div>
 

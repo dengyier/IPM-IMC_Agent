@@ -6,8 +6,8 @@ import { Icon } from "@/components/icon";
 import { cn } from "@/lib/utils";
 
 const TABS: { label: string; icon: string; href: string }[] = [
-  { label: "首页", icon: "home", href: "/" },
-  { label: "对话", icon: "bot", href: "/chat" },
+  { label: "工作台", icon: "home", href: "/" },
+  { label: "访谈", icon: "bot", href: "/chat" },
   { label: "诊断", icon: "activity", href: "/canvas-diagnosis" },
   { label: "我的", icon: "users", href: "/me" },
 ];

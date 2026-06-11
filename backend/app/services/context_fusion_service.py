@@ -21,9 +21,10 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.db.models import ExpansionItem, MethodologyNode
+from app.db.models import ExpansionItem, MethodologyEdge, MethodologyNode
 from app.schemas.diagnosis import RoutingDecision
 from app.services.embeddings import EmbeddingProvider
+from app.services.knowledge_graph_service import KnowledgeGraphService
 from app.services.vector_store import VectorStore
 
 # 优先级权重
@@ -32,6 +33,7 @@ W_CORE_CHUNK = 0.25
 W_APPROVED_EXPANSION = 0.15
 W_CASE = 0.10
 W_RECENCY = 0.05
+GRAPH_RELATION_WHITELIST = {"supports", "prerequisite", "causes", "validates", "constrains"}
 
 
 @dataclass
@@ -46,6 +48,9 @@ class FusedNode:
     key_questions: list[str]
     applicable_scenarios: list[str]
     score: float
+    source: str = "methodology_node"
+    expanded_from_node_id: str | None = None
+    relation_type: str | None = None
 
 
 @dataclass
@@ -66,6 +71,7 @@ class FusedContext:
     approved_expansions: list[FusedExpansion] = field(default_factory=list)
     cases: list[FusedExpansion] = field(default_factory=list)
     composite_score: float = 0.0
+    graph_expanded_count: int = 0
 
 
 class ContextFusionService:
@@ -90,6 +96,7 @@ class ContextFusionService:
         qv = self.embeddings.embed_text(query_text or "商业决策")
 
         nodes = self._fuse_nodes(routing, qv)
+        nodes = self._expand_graph_nodes(nodes)
         node_ids = [n.id for n in nodes]
         core_chunks = self._fuse_core_chunks(qv)
         approved, cases = self._fuse_expansions(node_ids, qv, tenant_id)
@@ -114,6 +121,7 @@ class ContextFusionService:
             approved_expansions=approved,
             cases=cases,
             composite_score=round(composite, 4),
+            graph_expanded_count=len([n for n in nodes if n.source == "graph_expanded"]),
         )
 
     # ------------------------------------------------------------------ #
@@ -155,6 +163,58 @@ class ContextFusionService:
             )
         fused.sort(key=lambda x: x.score, reverse=True)
         return fused
+
+    def _expand_graph_nodes(self, direct_nodes: list[FusedNode]) -> list[FusedNode]:
+        if not direct_nodes:
+            return direct_nodes
+        existing_ids = {node.id for node in direct_nodes}
+        candidates: list[tuple[float, MethodologyEdge, str, FusedNode]] = []
+        graph = KnowledgeGraphService(self.db, self.embeddings)
+        for source_node in direct_nodes:
+            per_source: list[tuple[float, MethodologyEdge, str, FusedNode]] = []
+            for edge in graph.neighbors(source_node.id):
+                if edge.relation_type not in GRAPH_RELATION_WHITELIST:
+                    continue
+                neighbor_id = (
+                    edge.target_node_id
+                    if edge.source_node_id == source_node.id
+                    else edge.source_node_id
+                )
+                if neighbor_id in existing_ids:
+                    continue
+                score = round(float(edge.weight or 0.0) * source_node.score * 0.6, 4)
+                score = min(score, max(source_node.score - 0.01, 0.01))
+                per_source.append((score, edge, neighbor_id, source_node))
+            per_source.sort(key=lambda item: item[0], reverse=True)
+            candidates.extend(per_source[:2])
+
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        expanded: list[FusedNode] = []
+        for score, edge, node_id, source_node in candidates:
+            if len(expanded) >= 6 or node_id in existing_ids:
+                continue
+            node = self.db.get(MethodologyNode, node_id)
+            if not node or node.status != "active":
+                continue
+            expanded.append(
+                FusedNode(
+                    id=node.id,
+                    node_name=node.node_name,
+                    node_category=node.node_category,
+                    definition=node.definition,
+                    core_principle=node.core_principle,
+                    core_thinking=node.core_thinking,
+                    decision_logic=list(node.decision_logic or []),
+                    key_questions=list(node.key_questions or []),
+                    applicable_scenarios=list(node.applicable_scenarios or []),
+                    score=score,
+                    source="graph_expanded",
+                    expanded_from_node_id=source_node.id,
+                    relation_type=edge.relation_type,
+                )
+            )
+            existing_ids.add(node_id)
+        return [*direct_nodes, *expanded]
 
     # ------------------------------------------------------------------ #
     # 核心切块 context（仅内部）

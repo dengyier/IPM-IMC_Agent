@@ -4,14 +4,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent } from "react";
 
 import { Icon } from "./icon";
-import type { AssistantAttachment } from "@/lib/api";
-import { ApiError, assistantApi } from "@/lib/api";
+import type { AssistantAttachment, Project, ValidationCard } from "@/lib/api";
+import { ApiError, assistantApi, projectApi, validationCardApi } from "@/lib/api";
 import { suggestionChips } from "@/lib/data";
 import { useAssistant } from "./assistant-context";
 import { useAuth } from "./auth-context";
 import { cn } from "@/lib/utils";
 
-// 工作台首页对话工作区：左侧全局导航之外的「中·对话主区 + 右·会话列表（可收起）」。
+// AI经营访谈对话工作区：左侧全局导航之外的「中·对话主区 + 右·会话列表（可收起）」。
 
 function titleFromQuestion(question: string): string {
   const title = question.trim().replace(/\s+/g, " ");
@@ -35,17 +35,73 @@ type PendingAttachment = {
   status: string;
 };
 
-export function HomeWorkspace() {
+function buildProjectCompanyContext(project: Project | null): string | undefined {
+  if (!project) return undefined;
+  const rows = [
+    `项目名称：${project.name}`,
+    project.industry ? `行业/场景：${project.industry}` : null,
+    project.target_customer ? `目标客户：${project.target_customer}` : null,
+    project.current_problem ? `当前核心问题：${project.current_problem}` : null,
+    project.task_pack ? `任务包：${project.task_pack}` : null,
+    project.status ? `项目状态：${project.status}` : null,
+  ].filter(Boolean);
+  return `当前经营档案上下文：\n${rows.join("\n")}`;
+}
+
+export function HomeWorkspace({ initialProjectId = null }: { initialProjectId?: string | null }) {
   const [convOpen, setConvOpen] = useState(false);
+  const [projectContext, setProjectContext] = useState<Project | null>(null);
+  const [projectLoading, setProjectLoading] = useState(false);
+  const [projectError, setProjectError] = useState<string | null>(null);
 
   useEffect(() => {
     const desktopQuery = window.matchMedia("(min-width: 768px)");
     setConvOpen(desktopQuery.matches);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!initialProjectId) {
+      setProjectContext(null);
+      setProjectError(null);
+      return;
+    }
+    setProjectLoading(true);
+    setProjectError(null);
+    projectApi
+      .detail(initialProjectId)
+      .then((project) => {
+        if (!cancelled) setProjectContext(project);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setProjectContext(null);
+          setProjectError(error instanceof ApiError ? error.message : "经营档案加载失败");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setProjectLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialProjectId]);
+
+  const projectCompanyContext = useMemo(
+    () => buildProjectCompanyContext(projectContext),
+    [projectContext]
+  );
+
   return (
     <div className="relative flex h-dvh min-w-0 flex-1 overflow-hidden md:h-screen">
-      <ChatMain convOpen={convOpen} onToggleConv={() => setConvOpen((v) => !v)} />
+      <ChatMain
+        convOpen={convOpen}
+        onToggleConv={() => setConvOpen((v) => !v)}
+        projectContext={projectContext}
+        projectLoading={projectLoading}
+        projectError={projectError}
+        projectCompanyContext={projectCompanyContext}
+      />
       {convOpen && <ConversationPanel onCollapse={() => setConvOpen(false)} />}
     </div>
   );
@@ -54,9 +110,17 @@ export function HomeWorkspace() {
 function ChatMain({
   convOpen,
   onToggleConv,
+  projectContext,
+  projectLoading,
+  projectError,
+  projectCompanyContext,
 }: {
   convOpen: boolean;
   onToggleConv: () => void;
+  projectContext: Project | null;
+  projectLoading: boolean;
+  projectError: string | null;
+  projectCompanyContext?: string;
 }) {
   const {
     input,
@@ -133,7 +197,7 @@ function ChatMain({
           truncated: false,
         }]
       : undefined;
-    await sendQuestion(question, undefined, messageAttachments);
+    await sendQuestion(question, projectCompanyContext, messageAttachments, projectContext?.id ?? null);
     setAttachment(null);
   }
 
@@ -248,9 +312,19 @@ function ChatMain({
               displayName={user?.display_name || "用户"}
               loading={loading}
               onDraft={fillDraft}
+              projectContext={projectContext}
+              projectLoading={projectLoading}
+              projectError={projectError}
             />
           ) : (
             <div className="mx-auto w-full max-w-[900px] space-y-3 py-4 md:space-y-4 md:py-6">
+              {(projectContext || projectLoading || projectError) && (
+                <ProjectContextStrip
+                  project={projectContext}
+                  loading={projectLoading}
+                  error={projectError}
+                />
+              )}
               {historyLoading && (
                 <div className="rounded-2xl border border-line bg-white px-4 py-3.5 text-[13px] text-slate-500 shadow-[0_10px_24px_rgba(30,58,138,0.05)]">
                   正在恢复历史会话...
@@ -266,11 +340,12 @@ function ChatMain({
                   depositingFileId={depositingFileId}
                   onDepositMessage={handleDepositMessage}
                   depositingMessageId={depositingMessageId}
+                  projectId={projectContext?.id ?? null}
                 />
               ))}
               {loading && (
                 <div className="max-w-[820px] rounded-2xl border border-line bg-white px-4 py-3.5 text-[13px] text-slate-500 shadow-[0_10px_24px_rgba(30,58,138,0.05)]">
-                  正在检索 IMC&IPM 核心知识节点，并调用 DeepSeek 生成解决方案...
+                  正在检索天机AI核心知识节点，并调用 DeepSeek 生成解决方案...
                 </div>
               )}
               <div ref={endRef} />
@@ -358,12 +433,18 @@ function ChatMain({
               </button>
             </form>
             <p className="mt-2 text-center text-[11px] text-slate-400">
-              回答由 AI 结合 IMC&IPM 核心知识节点生成，仅供决策参考。
+              回答由 AI 结合天机AI核心知识节点生成，仅供决策参考。
             </p>
           </div>
         </div>
       </main>
-      {focusOpen && <AssistantFocusMode onClose={() => setFocusOpen(false)} />}
+      {focusOpen && (
+        <AssistantFocusMode
+          onClose={() => setFocusOpen(false)}
+          projectCompanyContext={projectCompanyContext}
+          projectId={projectContext?.id ?? null}
+        />
+      )}
     </>
   );
 }
@@ -372,10 +453,16 @@ function HomeHero({
   displayName,
   loading,
   onDraft,
+  projectContext,
+  projectLoading,
+  projectError,
 }: {
   displayName: string;
   loading: boolean;
   onDraft: (question: string) => void;
+  projectContext: Project | null;
+  projectLoading: boolean;
+  projectError: string | null;
 }) {
   return (
     <div className="mx-auto flex min-h-full max-w-[760px] flex-col items-center justify-center py-20 text-center md:py-10">
@@ -386,8 +473,15 @@ function HomeHero({
         你好，{displayName}
       </h1>
       <p className="mt-3 max-w-[560px] text-[13px] leading-7 text-slate-500 md:text-[14px]">
-        输入企业诉求，我会结合 IMC&IPM 核心方法论、知识节点与已沉淀案例，帮你形成可执行的商业判断。
+        输入企业诉求，我会结合港大 IMC&IPM 方法论、知识图谱与已沉淀案例，帮你形成可执行的商业判断。
       </p>
+      {(projectContext || projectLoading || projectError) && (
+        <ProjectContextCard
+          project={projectContext}
+          loading={projectLoading}
+          error={projectError}
+        />
+      )}
       <div className="mt-8 grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
         {suggestionChips.map((question) => (
           <button
@@ -400,6 +494,102 @@ function HomeHero({
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+function projectTaskPackLabel(project: Project) {
+  const labels: Record<Project["task_pack"], string> = {
+    new_project: "新项目验证",
+    sales_growth: "销售增长",
+    ai_acquisition: "AI 获客",
+    review: "经营复盘",
+  };
+  return labels[project.task_pack] ?? project.task_pack;
+}
+
+function ProjectContextCard({
+  project,
+  loading,
+  error,
+}: {
+  project: Project | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  if (loading) {
+    return (
+      <div className="mt-6 w-full rounded-2xl border border-line bg-white px-4 py-3 text-left text-[13px] font-semibold text-slate-500 shadow-[0_10px_28px_rgba(30,58,138,0.05)]">
+        正在读取经营档案上下文...
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="mt-6 w-full rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 text-left text-[13px] font-semibold text-rose-500">
+        经营档案读取失败：{error}
+      </div>
+    );
+  }
+  if (!project) return null;
+  return (
+    <div className="mt-6 w-full rounded-3xl border border-[#dcd6ff] bg-white px-5 py-4 text-left shadow-[0_14px_36px_rgba(91,75,255,0.08)]">
+      <div className="flex items-start gap-3">
+        <span className="brand-gradient flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-white shadow-soft">
+          <Icon name="archive" className="h-5 w-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="truncate text-[15px] font-black text-ink">已关联经营档案：{project.name}</span>
+            <span className="rounded-full bg-[#f0edff] px-2.5 py-1 text-[11px] font-bold text-brand">
+              {projectTaskPackLabel(project)}
+            </span>
+          </div>
+          <div className="mt-2 grid gap-2 text-[12px] leading-5 text-slate-500 md:grid-cols-2">
+            <p className="line-clamp-2">目标客户：{project.target_customer || "尚未定义"}</p>
+            <p className="line-clamp-2">当前问题：{project.current_problem || "尚未沉淀"}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProjectContextStrip({
+  project,
+  loading,
+  error,
+}: {
+  project: Project | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  if (loading) {
+    return (
+      <div className="rounded-2xl border border-line bg-white px-4 py-3 text-[13px] text-slate-500 shadow-[0_10px_24px_rgba(30,58,138,0.05)]">
+        正在读取经营档案上下文...
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 text-[13px] font-semibold text-rose-500">
+        经营档案读取失败：{error}
+      </div>
+    );
+  }
+  if (!project) return null;
+  return (
+    <div className="rounded-2xl border border-[#dcd6ff] bg-[#fbfaff] px-4 py-3 text-[13px] shadow-[0_10px_24px_rgba(30,58,138,0.05)]">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-black text-[#172452]">当前项目：{project.name}</span>
+        <span className="rounded-full bg-[#f0edff] px-2 py-0.5 text-[11px] font-bold text-brand">
+          {projectTaskPackLabel(project)}
+        </span>
+      </div>
+      <p className="mt-1 line-clamp-2 text-slate-500">
+        {project.current_problem || project.target_customer || "本轮对话会自动带入该经营档案上下文。"}
+      </p>
     </div>
   );
 }
@@ -520,6 +710,179 @@ function AttachmentCard({
   );
 }
 
+function ValidationCardPreview({ card }: { card: ValidationCard }) {
+  const firstAction = card.actions?.[0];
+  return (
+    <div className="mt-3 rounded-xl border border-[#dcd6ff] bg-[#fbfaff] p-3 text-left">
+      <div className="flex items-start gap-2">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#f0edff] text-brand">
+          <Icon name="target" className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="truncate text-[12.5px] font-black text-[#172452]">
+              已生成验证卡：{card.title}
+            </span>
+            <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-600">
+              草稿
+            </span>
+          </div>
+          <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-slate-500">
+            {card.biggest_uncertainty || card.core_judgment}
+          </p>
+          {firstAction && (
+            <p className="mt-2 rounded-lg bg-white px-2.5 py-2 text-[12px] leading-5 text-[#172452]">
+              第一步：{firstAction.title} · {firstAction.success_metric}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TianjiSimulationPanel({
+  simulation,
+  compact = false,
+}: {
+  simulation?: ReturnType<typeof useAssistant>["messages"][number]["tianjiSimulation"];
+  compact?: boolean;
+}) {
+  if (!simulation) return null;
+  const paths = simulation.scenario_paths?.slice(0, compact ? 2 : 3) ?? [];
+  const risks = simulation.risk_audit?.slice(0, compact ? 2 : 3) ?? [];
+  const steps = simulation.validation_plan?.slice(0, compact ? 2 : 3) ?? [];
+  const contradictions = simulation.contradictions?.slice(0, compact ? 2 : 3) ?? [];
+  const assumptionStatus = simulation.assumption_status?.slice(0, compact ? 2 : 3) ?? [];
+  const candidates = simulation.archive_candidates?.slice(0, compact ? 2 : 3) ?? [];
+  if (
+    paths.length === 0 &&
+    risks.length === 0 &&
+    steps.length === 0 &&
+    contradictions.length === 0 &&
+    assumptionStatus.length === 0 &&
+    candidates.length === 0
+  )
+    return null;
+
+  return (
+    <div className="mt-3 rounded-xl border border-[#dcd6ff] bg-[#fbfaff] p-3 text-left">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#f0edff] text-brand">
+          <Icon name="route" className="h-3.5 w-3.5" />
+        </span>
+        <div className="text-[12px] font-black text-[#172452]">天机多路径推演</div>
+        <span className="rounded-md bg-white px-2 py-0.5 text-[10.5px] font-bold text-slate-400">
+          {simulation.algorithm_version}
+        </span>
+      </div>
+
+      {paths.length > 0 && (
+        <div className={cn("mt-3 grid gap-2", compact ? "md:grid-cols-2" : "md:grid-cols-3")}>
+          {paths.map((path, index) => (
+            <div key={`${path.name}-${index}`} className="rounded-lg bg-white px-3 py-2">
+              <div className="truncate text-[12px] font-black text-brand">{path.name}</div>
+              <p className="mt-1 line-clamp-3 text-[11.5px] leading-5 text-slate-500">
+                {path.decision_implication || path.description || "该路径需要继续用真实业务数据验证。"}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {(risks.length > 0 || steps.length > 0) && (
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          {risks.length > 0 && (
+            <div className="rounded-lg bg-white px-3 py-2">
+              <div className="flex items-center gap-1.5 text-[11.5px] font-black text-orange-500">
+                <Icon name="alert" className="h-3.5 w-3.5" />
+                关键风险
+              </div>
+              <div className="mt-1.5 space-y-1 text-[11.5px] leading-5 text-slate-500">
+                {risks.map((risk, index) => (
+                  <p key={`${risk.risk}-${index}`} className="line-clamp-2">
+                    {risk.risk}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+          {steps.length > 0 && (
+            <div className="rounded-lg bg-white px-3 py-2">
+              <div className="flex items-center gap-1.5 text-[11.5px] font-black text-emerald-600">
+                <Icon name="target" className="h-3.5 w-3.5" />
+                优先验证
+              </div>
+              <div className="mt-1.5 space-y-1 text-[11.5px] leading-5 text-slate-500">
+                {steps.map((step, index) => (
+                  <p key={`${step.step}-${index}`} className="line-clamp-2">
+                    {step.step}{step.success_criteria ? ` · ${step.success_criteria}` : ""}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {(contradictions.length > 0 || assumptionStatus.length > 0) && (
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          {contradictions.length > 0 && (
+            <div className="rounded-lg bg-white px-3 py-2">
+              <div className="flex items-center gap-1.5 text-[11.5px] font-black text-rose-500">
+                <Icon name="alert" className="h-3.5 w-3.5" />
+                历史矛盾
+              </div>
+              <div className="mt-1.5 space-y-1 text-[11.5px] leading-5 text-slate-500">
+                {contradictions.map((item, index) => (
+                  <p key={`${item}-${index}`} className="line-clamp-2">
+                    {item}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+          {assumptionStatus.length > 0 && (
+            <div className="rounded-lg bg-white px-3 py-2">
+              <div className="flex items-center gap-1.5 text-[11.5px] font-black text-blue-600">
+                <Icon name="clipboard-check" className="h-3.5 w-3.5" />
+                假设状态
+              </div>
+              <div className="mt-1.5 space-y-1 text-[11.5px] leading-5 text-slate-500">
+                {assumptionStatus.map((item, index) => (
+                  <p key={`${item.assumption}-${index}`} className="line-clamp-2">
+                    {item.status ? `${item.status} · ` : ""}
+                    {item.assumption}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {candidates.length > 0 && (
+        <div className="mt-3 rounded-lg bg-white px-3 py-2">
+          <div className="flex items-center gap-1.5 text-[11.5px] font-black text-brand">
+            <Icon name="archive" className="h-3.5 w-3.5" />
+            可沉淀资产
+          </div>
+          <div className="mt-1.5 space-y-1 text-[11.5px] leading-5 text-slate-500">
+            {candidates.map((candidate, index) => (
+              <p key={`${candidate}-${index}`} className="line-clamp-2">
+                {candidate}
+              </p>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[10.5px] font-medium text-slate-400">
+            点「沉淀本回答」可将推演资产一并提交人工审核，进入团队知识候选池
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MessageBubble({
   message,
   loading,
@@ -528,6 +891,7 @@ function MessageBubble({
   depositingFileId,
   onDepositMessage,
   depositingMessageId,
+  projectId,
 }: {
   message: ReturnType<typeof useAssistant>["messages"][number];
   loading: boolean;
@@ -536,10 +900,32 @@ function MessageBubble({
   depositingFileId: string | null;
   onDepositMessage: (messageId: string) => void;
   depositingMessageId: string | null;
+  projectId?: string | null;
 }) {
   const messageDeposited = Boolean(message.depositedSourceId);
   const canDepositMessage = message.role === "assistant" && message.id !== "welcome";
   const isAssistant = message.role !== "user";
+  const [validationCard, setValidationCard] = useState<ValidationCard | null>(null);
+  const [creatingValidation, setCreatingValidation] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  async function handleCreateValidationCard() {
+    if (creatingValidation || validationCard) return;
+    setCreatingValidation(true);
+    setValidationError(null);
+    try {
+      const card = await validationCardApi.create({
+        source_message_id: message.id,
+        project_id: projectId ?? undefined,
+      });
+      setValidationCard(card);
+    } catch (error) {
+      setValidationError(error instanceof ApiError ? error.message : "验证卡生成失败");
+    } finally {
+      setCreatingValidation(false);
+    }
+  }
+
   return (
     <div className={cn("w-full", isAssistant && "flex items-start gap-2.5 md:block")}>
       {isAssistant && (
@@ -556,6 +942,9 @@ function MessageBubble({
         )}
       >
         <div className="whitespace-pre-line">{message.content}</div>
+        {message.role === "assistant" && (
+          <TianjiSimulationPanel simulation={message.tianjiSimulation} compact />
+        )}
         {message.attachments && message.attachments.length > 0 && (
           <div className="mt-3 space-y-2">
             {message.attachments.map((attachment) => (
@@ -620,6 +1009,26 @@ function MessageBubble({
             <Icon name="chevron-right" className="h-3.5 w-3.5" />
           </a>
         )}
+        {canDepositMessage && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line/70 pt-2">
+            <button
+              type="button"
+              disabled={loading || creatingValidation || Boolean(validationCard)}
+              onClick={handleCreateValidationCard}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#f0edff] px-2.5 py-1.5 text-[12px] font-bold text-brand transition hover:bg-[#e8e4ff] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Icon
+                name={creatingValidation ? "refresh" : "target"}
+                className={cn("h-3.5 w-3.5", creatingValidation && "animate-spin")}
+              />
+              {validationCard ? "已生成验证卡" : creatingValidation ? "生成中" : "生成验证卡"}
+            </button>
+            {validationError && (
+              <span className="text-[12px] font-semibold text-rose-500">{validationError}</span>
+            )}
+          </div>
+        )}
+        {validationCard && <ValidationCardPreview card={validationCard} />}
         {canDepositMessage && (
           <div className="mt-3 border-t border-line/70 pt-2">
             {messageDeposited ? (
@@ -740,7 +1149,15 @@ function ConversationPanel({ onCollapse }: { onCollapse: () => void }) {
   );
 }
 
-function AssistantFocusMode({ onClose }: { onClose: () => void }) {
+function AssistantFocusMode({
+  onClose,
+  projectCompanyContext,
+  projectId,
+}: {
+  onClose: () => void;
+  projectCompanyContext?: string;
+  projectId?: string | null;
+}) {
   const {
     input,
     messages,
@@ -778,7 +1195,7 @@ function AssistantFocusMode({ onClose }: { onClose: () => void }) {
     if (event.key !== "Enter" || event.shiftKey) return;
     event.preventDefault();
     if (canSend) {
-      sendQuestion();
+      sendQuestion(undefined, projectCompanyContext, undefined, projectId ?? null);
     }
   }
 
@@ -809,7 +1226,7 @@ function AssistantFocusMode({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-50 flex bg-white text-ink">
       <aside className="flex w-[268px] shrink-0 flex-col border-r border-[#ececf1] bg-[#f7f7f8]">
         <div className="flex h-14 items-center justify-between px-4">
-          <div className="text-[18px] font-black tracking-[-0.02em]">IMC&IPM</div>
+          <div className="text-[18px] font-black tracking-[-0.02em]">天机AI</div>
           <button
             onClick={onClose}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-white hover:text-brand"
@@ -877,7 +1294,7 @@ function AssistantFocusMode({ onClose }: { onClose: () => void }) {
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 items-center justify-between px-6">
           <div className="flex items-center gap-2">
-            <span className="text-[14px] font-black">IMC&IPM 智能助手</span>
+            <span className="text-[14px] font-black">天机AI商业决策智能体</span>
             <span className="rounded-md bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet">
               DeepSeek
             </span>
@@ -899,14 +1316,14 @@ function AssistantFocusMode({ onClose }: { onClose: () => void }) {
                   你在忙什么？
                 </h1>
                 <p className="mt-3 max-w-[620px] text-[14px] leading-7 text-slate-500">
-                  输入具体企业诉求，我会结合港大 IMC&IPM 核心方法论、知识节点和已沉淀案例，帮你形成可执行的商业判断。
+                  输入具体企业诉求，我会结合港大 IMC&IPM 核心方法论、知识图谱和已沉淀案例，帮你形成可执行的商业判断。
                 </p>
                 <div className="mt-8 grid max-w-[720px] grid-cols-2 gap-3">
                   {[
                     "分析一下这个项目的主要风险",
                     "判断价值主张是否成立",
-                    "生成一份商业画布报告",
-                    "评估这个方案的可行性",
+                    "为这个项目设计 7 天验证计划",
+                    "从客户、渠道、成本三方推演一下",
                   ].map((question) => (
                     <button
                       key={question}
@@ -932,6 +1349,7 @@ function AssistantFocusMode({ onClose }: { onClose: () => void }) {
                     depositingFileId={depositingFileId}
                     onDepositMessage={handleDepositMessage}
                     depositingMessageId={depositingMessageId}
+                    projectId={projectId}
                   />
                 ))}
                 {loading && (
@@ -954,7 +1372,7 @@ function AssistantFocusMode({ onClose }: { onClose: () => void }) {
               onSubmit={(event) => {
                 event.preventDefault();
                 if (canSend) {
-                  sendQuestion();
+                  sendQuestion(undefined, projectCompanyContext, undefined, projectId ?? null);
                 }
               }}
               className="mx-auto flex max-w-[980px] items-end gap-3 rounded-[24px] border border-line bg-white py-3 pl-4 pr-3 shadow-[0_18px_60px_rgba(15,23,42,0.11)] transition-colors focus-within:border-brand/50"
@@ -1000,6 +1418,7 @@ function FocusMessage({
   depositingFileId,
   onDepositMessage,
   depositingMessageId,
+  projectId,
 }: {
   message: ReturnType<typeof useAssistant>["messages"][number];
   loading: boolean;
@@ -1008,7 +1427,29 @@ function FocusMessage({
   depositingFileId: string | null;
   onDepositMessage: (messageId: string) => void;
   depositingMessageId: string | null;
+  projectId?: string | null;
 }) {
+  const [validationCard, setValidationCard] = useState<ValidationCard | null>(null);
+  const [creatingValidation, setCreatingValidation] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  async function handleCreateValidationCard() {
+    if (creatingValidation || validationCard) return;
+    setCreatingValidation(true);
+    setValidationError(null);
+    try {
+      const card = await validationCardApi.create({
+        source_message_id: message.id,
+        project_id: projectId ?? undefined,
+      });
+      setValidationCard(card);
+    } catch (error) {
+      setValidationError(error instanceof ApiError ? error.message : "验证卡生成失败");
+    } finally {
+      setCreatingValidation(false);
+    }
+  }
+
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
@@ -1040,6 +1481,7 @@ function FocusMessage({
         <div className="whitespace-pre-line text-[14px] leading-7 text-[#172452]">
           {message.content}
         </div>
+        <TianjiSimulationPanel simulation={message.tianjiSimulation} />
         {message.nodeRefs && message.nodeRefs.length > 0 && (
           <div className="mt-4 border-t border-line pt-3">
             <div className="text-[12px] font-bold text-slate-400">
@@ -1084,6 +1526,26 @@ function FocusMessage({
             <Icon name="chevron-right" className="h-3.5 w-3.5" />
           </a>
         )}
+        {message.id !== "welcome" && (
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+            <button
+              type="button"
+              disabled={loading || creatingValidation || Boolean(validationCard)}
+              onClick={handleCreateValidationCard}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-[#f0edff] px-3 py-2 text-[13px] font-bold text-brand transition hover:bg-[#e8e4ff] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Icon
+                name={creatingValidation ? "refresh" : "target"}
+                className={cn("h-3.5 w-3.5", creatingValidation && "animate-spin")}
+              />
+              {validationCard ? "已生成验证卡" : creatingValidation ? "生成中" : "生成验证卡"}
+            </button>
+            {validationError && (
+              <span className="text-[12px] font-semibold text-rose-500">{validationError}</span>
+            )}
+          </div>
+        )}
+        {validationCard && <ValidationCardPreview card={validationCard} />}
         {message.id !== "welcome" && (
           <div className="mt-4 border-t border-line pt-3">
             {message.depositedSourceId ? (

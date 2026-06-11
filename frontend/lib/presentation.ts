@@ -66,6 +66,8 @@ export const sourceTypeLabels: Record<string, string> = {
   class_transcript: "课堂转写",
   enterprise_case: "企业案例",
   external_doc: "外部资料",
+  practice_feedback: "对话沉淀",
+  tianji_simulation: "天机推演沉淀",
 };
 export const sourceTypeLabel = (t: string) => sourceTypeLabels[t] ?? t;
 

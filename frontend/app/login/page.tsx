@@ -90,7 +90,7 @@ export default function LoginPage() {
             </div>
 
             <div className="mt-16 grid max-w-[430px] grid-cols-2 gap-3">
-              {["港大 IMC&IPM 方法论", "DeepSeek V4 推理", "商业画布诊断", "报告沉淀复用"].map((item) => (
+              {["港大 IMC&IPM 方法论", "DeepSeek V4 推理", "项目验证诊断", "报告沉淀复用"].map((item) => (
                 <div key={item} className="rounded-2xl border border-white/80 bg-white/76 px-4 py-3 text-[13px] font-bold text-[#26345f] shadow-[0_12px_28px_rgba(30,58,138,0.06)]">
                   {item}
                 </div>

@@ -20,6 +20,7 @@ from app.schemas.dashboard import (
     PendingItem,
     RecentReport,
     RecentReviewTask,
+    TianjiMetrics,
 )
 from app.services.dashboard_service import DashboardService
 from app.services.llm import LLMService
@@ -67,3 +68,12 @@ def recent_review_tasks(
     user: AuthUser = Depends(get_current_user),
 ) -> list[RecentReviewTask]:
     return DashboardService(db, tenant_scope(user)).recent_review_tasks(limit=limit)
+
+
+@router.get("/tianji-metrics", response_model=TianjiMetrics)
+def tianji_metrics(
+    days: int = 30,
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+) -> TianjiMetrics:
+    return DashboardService(db, tenant_scope(user)).tianji_metrics(days=days)
