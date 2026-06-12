@@ -15,14 +15,17 @@ from app.api.routers import (
     assistant,
     auth,
     dashboard,
+    decision_cases,
     diagnosis,
     expansion,
     feedback,
     methodology,
     project,
     system,
+    tianji_bach,
     tasks,
     validation,
+    workbench,
 )
 from app.core.config import get_settings
 from app.db.session import init_db
@@ -53,6 +56,7 @@ def create_app() -> FastAPI:
     app.include_router(tasks.router)
     app.include_router(assistant.router)
     app.include_router(dashboard.router)
+    app.include_router(decision_cases.router)
     app.include_router(methodology.router)
     app.include_router(expansion.router)
     app.include_router(expansion.review_router)
@@ -60,6 +64,8 @@ def create_app() -> FastAPI:
     app.include_router(feedback.router)
     app.include_router(project.router)
     app.include_router(validation.router)
+    app.include_router(tianji_bach.router)
+    app.include_router(workbench.router)
 
     @app.get("/")
     def root() -> dict:

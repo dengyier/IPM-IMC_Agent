@@ -457,6 +457,13 @@ export interface AssistantAskResponse {
   tianji_simulation?: TianjiSimulationResult | null;
 }
 
+export type AssistantStreamHandlers = {
+  onMeta?: (data: { conversation_id: string }) => void;
+  onPhase?: (data: { message: string }) => void;
+  onDelta?: (data: { text: string }) => void;
+  onFinal?: (data: AssistantAskResponse) => void;
+};
+
 export interface AssistantMessageRecord {
   id: string;
   role: "user" | "assistant";
@@ -546,7 +553,8 @@ export const assistantApi = {
     companyContext?: string,
     conversationId?: string | null,
     attachments?: AssistantAttachment[],
-    projectId?: string | null
+    projectId?: string | null,
+    validationCardId?: string | null
   ) =>
     api.post<AssistantAskResponse>("/api/assistant/ask", {
       question,
@@ -554,7 +562,94 @@ export const assistantApi = {
       conversation_id: conversationId || undefined,
       attachments: attachments && attachments.length > 0 ? attachments : undefined,
       project_id: projectId || undefined,
+      validation_card_id: validationCardId || undefined,
     }),
+  askStream: async (
+    question: string,
+    companyContext?: string,
+    conversationId?: string | null,
+    attachments?: AssistantAttachment[],
+    projectId?: string | null,
+    validationCardId?: string | null,
+    handlers: AssistantStreamHandlers = {}
+  ) => {
+    const headers = new Headers({ "Content-Type": "application/json", Accept: "text/event-stream" });
+    const token = getStoredAuthToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const res = await fetch(`${API_BASE}/api/assistant/ask/stream`, {
+      method: "POST",
+      headers,
+      cache: "no-store",
+      body: JSON.stringify({
+        question,
+        company_context: companyContext,
+        conversation_id: conversationId || undefined,
+        attachments: attachments && attachments.length > 0 ? attachments : undefined,
+        project_id: projectId || undefined,
+        validation_card_id: validationCardId || undefined,
+      }),
+    });
+    const requestId = res.headers.get("X-Request-Id") || undefined;
+    if (!res.ok) {
+      let code = "HTTP_ERROR";
+      let detail = res.statusText;
+      try {
+        const body = await res.json();
+        if (body?.error) {
+          code = body.error.code ?? code;
+          detail = body.error.detail ?? detail;
+        }
+      } catch {
+        /* 非 JSON 错误体 */
+      }
+      throw new ApiError(code, detail, res.status, requestId);
+    }
+    if (!res.body) throw new ApiError("STREAM_UNAVAILABLE", "浏览器未返回流式响应", res.status, requestId);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalReceived = false;
+
+    function dispatchBlock(block: string) {
+      const lines = block.split(/\r?\n/);
+      const event = lines.find((line) => line.startsWith("event:"))?.slice(6).trim() || "message";
+      const dataText = lines
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trimStart())
+        .join("\n");
+      if (!dataText) return;
+      const data = JSON.parse(dataText);
+      if (event === "meta") handlers.onMeta?.(data);
+      if (event === "phase") handlers.onPhase?.(data);
+      if (event === "delta") handlers.onDelta?.(data);
+      if (event === "final") {
+        finalReceived = true;
+        handlers.onFinal?.(data);
+      }
+      if (event === "error") {
+        throw new ApiError("STREAM_ERROR", data.detail || "流式问答失败", res.status, requestId);
+      }
+    }
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let separatorIndex = buffer.indexOf("\n\n");
+      while (separatorIndex >= 0) {
+        const block = buffer.slice(0, separatorIndex).trim();
+        buffer = buffer.slice(separatorIndex + 2);
+        if (block) dispatchBlock(block);
+        separatorIndex = buffer.indexOf("\n\n");
+      }
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) dispatchBlock(buffer.trim());
+    if (!finalReceived) {
+      throw new ApiError("STREAM_INCOMPLETE", "流式问答未返回完整结果", res.status, requestId);
+    }
+  },
 };
 
 // ---- 经营档案 / 项目 ----
@@ -603,13 +698,33 @@ export const projectApi = {
 
 export type ValidationStatus = "draft" | "running" | "completed" | "archived";
 
+export interface ValidationEvidenceItem {
+  text: string;
+  created_at?: string | null;
+}
+
 export interface ValidationAction {
+  node_id: string;
+  parent_id?: string | null;
+  node_type: string;
+  branch_condition: string;
   title: string;
   objective: string;
   steps: string[];
   success_metric: string;
+  grounded_on: string;
+  target: string;
+  baseline: string;
   owner?: string | null;
   day_range: string;
+  day?: number | null;
+  status: "todo" | "running" | "done" | "blocked";
+  progress: number;
+  evidence_count: number;
+  evidence_target: number;
+  evidence_items?: ValidationEvidenceItem[];
+  due_at?: string | null;
+  completed_at?: string | null;
 }
 
 export interface ValidationDecisionCriteria {
@@ -681,6 +796,238 @@ export const validationCardApi = {
     >
   ) =>
     api.patch<ValidationCard>(`/api/validation-cards/${id}`, payload),
+  updateAction: (
+    id: string,
+    actionIndex: number,
+    payload: Partial<
+      Pick<ValidationAction, "status" | "progress" | "evidence_count" | "owner" | "due_at" | "completed_at">
+    > & { evidence_note?: string }
+  ) => api.patch<ValidationCard>(`/api/validation-cards/${id}/actions/${actionIndex}`, payload),
+  submitReview: (
+    id: string,
+    payload: {
+      final_decision: "continue" | "adjust" | "pause";
+      interview_count?: number;
+      paid_intent_count?: number;
+      rejection_reasons?: string[];
+      channel_quotes?: string[];
+      estimated_cac?: string;
+      actual_outcome?: string;
+      learnings?: string;
+    }
+  ) => api.post<ValidationCard>(`/api/validation-cards/${id}/review`, payload),
+};
+
+// ---- 决策病例库 ----
+
+export interface DecisionCase {
+  id: string;
+  project_id: string | null;
+  validation_card_id: string;
+  title: string;
+  industry: string | null;
+  decision: "继续" | "调整" | "暂停" | string;
+  evidence_grade: string;
+  planned_investment: string;
+  saved_investment_estimate: string;
+  biggest_uncertainty: string;
+  final_outcome: string;
+  key_learning: string;
+  failure_patterns: string[];
+  assets: { label: string; kind: string }[];
+  reviewed_at: string | null;
+}
+
+export const decisionCaseApi = {
+  list: (limit = 20) => api.get<DecisionCase[]>(`/api/decision-cases?limit=${limit}`),
+};
+
+// ---- 验证工作台（首页聚合视图）----
+
+export interface WorkbenchProject {
+  id: string | null;
+  name: string;
+  industry: string | null;
+  current_problem: string;
+  target_customer: string;
+  task_pack: ProjectTaskPack;
+  status: ProjectStatus;
+  planned_investment: string | null;
+  decision_deadline: string | null;
+  updated_at: string | null;
+}
+
+export interface WorkbenchTimelineItem {
+  day: number;
+  label: string;
+  status: "done" | "current" | "pending";
+}
+
+export interface WorkbenchAction {
+  node_id: string;
+  parent_id?: string | null;
+  node_type: string;
+  branch_condition: string;
+  title: string;
+  objective: string;
+  success_metric: string;
+  grounded_on: string;
+  target: string;
+  baseline: string;
+  owner: string | null;
+  day_range: string;
+  status: "todo" | "running" | "done" | "blocked" | string;
+  progress: number;
+  evidence_count: number;
+  evidence_target: number;
+  missing_evidence_count: number;
+  evidence_items: ValidationEvidenceItem[];
+}
+
+export interface WorkbenchColdReview {
+  verdict: string;
+  confidence: number;
+  reasons: string[];
+  risk_level: "low" | "medium" | "high" | string;
+}
+
+export interface WorkbenchEvidenceStatus {
+  existing: number;
+  missing: number;
+  pending: number;
+  grade: string;
+}
+
+export interface WorkbenchCaseAsset {
+  label: string;
+  status: "pending" | "ready" | string;
+}
+
+export interface WorkbenchBachHypothesis {
+  id: string;
+  statement: string;
+  dimension: string;
+  probability: number;
+  impact_weight: number;
+  status: string;
+}
+
+export interface WorkbenchBachSnapshot {
+  verdict: string;
+  probability: number;
+  kill_criteria: Record<string, unknown>[];
+  hypotheses: WorkbenchBachHypothesis[];
+  replay_consistent: boolean;
+}
+
+export interface WorkbenchSummary {
+  has_data: boolean;
+  current_project: WorkbenchProject | null;
+  current_card_id: string | null;
+  current_day: number;
+  total_days: number;
+  final_decision: string;
+  next_action: string;
+  evidence_updated_at: string | null;
+  timeline: WorkbenchTimelineItem[];
+  actions: WorkbenchAction[];
+  cold_review: WorkbenchColdReview;
+  evidence_status: WorkbenchEvidenceStatus;
+  case_assets: WorkbenchCaseAsset[];
+  bach: WorkbenchBachSnapshot | null;
+}
+
+export const workbenchApi = {
+  summary: () => api.get<WorkbenchSummary>("/api/workbench/summary"),
+};
+
+// ---- Tianji-BACH v2 审计视图 ----
+
+export interface TianjiBachHypothesis {
+  id: string;
+  statement: string;
+  dimension: string;
+  falsified_by: string;
+  validated_by: string;
+  prior_logodds: number;
+  current_logodds: number;
+  probability: number;
+  impact_weight: number;
+  structural_weight: number;
+  decisive: boolean;
+  status: string;
+}
+
+export interface TianjiBachEvidence {
+  id: string;
+  hypothesis_id: string;
+  content: string;
+  source_type: string;
+  source_ref: string;
+  grade: string;
+  log_lr_raw: number;
+  log_lr_effective: number;
+  reviewer_spread: number;
+  review_detail: Record<string, unknown>;
+  created_at: string | null;
+}
+
+export interface TianjiBachPrediction {
+  id: string;
+  verdict: string;
+  probability: number;
+  probability_raw: number;
+  kill_criteria: Record<string, unknown>[];
+  outcome: number | null;
+  brier: number | null;
+  created_at: string | null;
+  resolved_at: string | null;
+}
+
+export interface TianjiBachCase {
+  case_id: string;
+  algorithm_version: string;
+  adjudication: {
+    probability: number;
+    verdict: string;
+    vetoed_by: string | null;
+    reasons: string[];
+    kill_criteria: Record<string, unknown>[];
+  } | null;
+  hypotheses: TianjiBachHypothesis[];
+  evidence: TianjiBachEvidence[];
+  predictions: TianjiBachPrediction[];
+  replay_logodds: Record<string, number>;
+  replay_consistent: boolean;
+  sandbox: TianjiSandboxResult | null;
+}
+
+export interface TianjiSandboxTornadoItem {
+  param: string;
+  label: string;
+  p_at_min: number;
+  p_at_max: number;
+  swing: number;
+}
+
+export interface TianjiSandboxResult {
+  available: boolean;
+  missing: string[];
+  investment: number | null;
+  target_months: number | null;
+  simulations: number;
+  params: Record<string, { label: string; min: number; mode: number; max: number }>;
+  p_payback: number | null;
+  loss_probability: number | null;
+  payback_p50: number | null;
+  payback_p90: number | null;
+  tornado: TianjiSandboxTornadoItem[];
+  generated_at: string | null;
+}
+
+export const tianjiBachApi = {
+  case: (cardId: string) => api.get<TianjiBachCase>(`/api/tianji-bach/cases/${cardId}`),
+  runSandbox: (cardId: string) => api.post<TianjiSandboxResult>(`/api/tianji-bach/cases/${cardId}/sandbox`, {}),
 };
 
 // ---- 系统健康 / 连接测试 / 只读配置 ----

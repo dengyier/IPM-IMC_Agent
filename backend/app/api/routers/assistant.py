@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -32,6 +34,7 @@ from app.db.models import (
     ExpansionSource,
     Project,
     ReviewTask,
+    ValidationCard,
 )
 from app.db.models.auth import AuthUser
 from app.db.session import get_db
@@ -54,10 +57,14 @@ from app.services.deposit_service import deposit_text_source
 from app.services.document_parser import chunk_pages, clean_text, parse_document_pages
 from app.services.embeddings import EmbeddingProvider
 from app.services.llm import LLMService
-from app.services import project_service
+from app.services import project_service, tianji_bach_service
 from app.services.vector_store import VectorStore
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 def _title_from_question(question: str) -> str:
@@ -238,6 +245,140 @@ def _project_context_for_assistant(
     if history:
         parts.extend(["", "项目历史上下文：", history])
     return "\n".join(parts)
+
+
+def _validation_card_context_for_assistant(
+    db: Session,
+    validation_card_id: str | None,
+    tid: str | None,
+) -> tuple[str, str | None]:
+    if not validation_card_id:
+        return "", None
+    card = db.get(ValidationCard, validation_card_id)
+    if not card or (tid is not None and card.tenant_id != tid):
+        raise HTTPException(status_code=404, detail="验证任务不存在")
+
+    lines = [
+        "当前7天验证任务上下文：",
+        f"验证卡ID：{card.id}",
+        f"任务标题：{card.title}",
+        f"项目摘要：{card.project_summary or '未填写'}",
+        f"核心判断：{card.core_judgment or '未填写'}",
+        f"最大不确定性：{card.biggest_uncertainty or '未填写'}",
+        f"目标客户：{card.target_customer or '未填写'}",
+        f"最可能失败原因：{card.failure_reason or '未填写'}",
+        f"验证状态：{card.status}",
+    ]
+    if card.result:
+        lines.append(f"复盘结果：{card.result}")
+    if card.actual_outcome:
+        lines.append(f"真实结果：{card.actual_outcome}")
+    if card.learnings:
+        lines.append(f"复盘学习：{card.learnings}")
+
+    criteria = card.decision_criteria or {}
+    if isinstance(criteria, dict) and criteria:
+        lines.extend(["", "第7天决策标准："])
+        for key, label in (
+            ("continue_when", "继续投入"),
+            ("adjust_when", "调整后再投"),
+            ("pause_when", "暂停"),
+        ):
+            value = str(criteria.get(key) or "").strip()
+            if value:
+                lines.append(f"- {label}：{value}")
+
+    actions = card.actions or []
+    if actions:
+        lines.extend(["", "决策树/验证任务节点："])
+        for index, action in enumerate(actions[:12], start=1):
+            if not isinstance(action, dict):
+                continue
+            title = str(action.get("title") or f"节点{index}").strip()
+            node_id = str(action.get("node_id") or index).strip()
+            parent_id = str(action.get("parent_id") or "").strip()
+            node_type = str(action.get("node_type") or "evidence").strip()
+            branch = str(action.get("branch_condition") or "").strip()
+            objective = str(action.get("objective") or "").strip()
+            metric = str(action.get("success_metric") or "").strip()
+            grounded_on = str(action.get("grounded_on") or "").strip()
+            target = str(action.get("target") or "").strip()
+            baseline = str(action.get("baseline") or "").strip()
+            status = str(action.get("status") or "todo").strip()
+            progress = action.get("progress", 0)
+            evidence_count = action.get("evidence_count", 0)
+            lines.append(
+                f"{index}. [{node_id} | {node_type}"
+                f"{f' | parent={parent_id}' if parent_id else ''}] {title}"
+            )
+            if branch:
+                lines.append(f"   分支条件：{branch}")
+            if objective:
+                lines.append(f"   验证目的：{objective}")
+            if grounded_on:
+                lines.append(f"   对应假设：{grounded_on}")
+            if target or baseline:
+                lines.append(f"   对象/基线：{target or '未填写'} / {baseline or '未填写'}")
+            if metric:
+                lines.append(f"   成功标准：{metric}")
+            lines.append(f"   执行状态：{status}，进度 {progress}%，证据 {evidence_count} 条")
+            evidence_items = action.get("evidence_items") or []
+            if isinstance(evidence_items, list) and evidence_items:
+                evidence_texts = []
+                for item in evidence_items[-2:]:
+                    if isinstance(item, dict):
+                        text = str(item.get("text") or "").strip()
+                    else:
+                        text = str(item).strip()
+                    if text:
+                        evidence_texts.append(text)
+                if evidence_texts:
+                    lines.append(f"   最近证据：{'；'.join(evidence_texts)}")
+
+    adjudication = tianji_bach_service.adjudicate(db, card.id)
+    if adjudication:
+        verdict_map = {"continue": "继续", "adjust": "调整后再投", "pause": "暂停"}
+        verdict = verdict_map.get(str(adjudication.get("verdict") or ""), adjudication.get("verdict"))
+        probability = float(adjudication.get("probability") or 0)
+        lines.extend(
+            [
+                "",
+                "BACH 冷酷审判：",
+                f"- 当前裁决：{verdict}",
+                f"- 综合置信度：{int(probability * 100)}%",
+            ]
+        )
+        reasons = adjudication.get("reasons") or []
+        if reasons:
+            lines.append("- 裁决理由：" + "；".join(str(item) for item in reasons[:3]))
+        kill_criteria = adjudication.get("kill_criteria") or []
+        if kill_criteria:
+            signals = [
+                str(item.get("signal") or "").strip()
+                for item in kill_criteria
+                if isinstance(item, dict) and str(item.get("signal") or "").strip()
+            ]
+            if signals:
+                lines.append("- 即停信号：" + "；".join(signals[:4]))
+        hypotheses = adjudication.get("hypotheses") or []
+        if hypotheses:
+            lines.append("- 关键假设：")
+            for item in hypotheses[:5]:
+                if not isinstance(item, dict):
+                    continue
+                statement = str(item.get("statement") or "").strip()
+                if not statement:
+                    continue
+                p = int(float(item.get("probability") or 0) * 100)
+                lines.append(f"  · {statement}（置信度 {p}%）")
+
+    lines.extend(
+        [
+            "",
+            "访谈要求：围绕上述验证卡继续追问、补证据、更新判断；不要重新泛泛生成一张验证卡。",
+        ]
+    )
+    return "\n".join(lines)[:12000], card.project_id
 
 
 def _merge_context(*parts: str | None) -> str | None:
@@ -461,6 +602,23 @@ def _assistant_file_as_deposit_text(
     return "\n".join(lines).strip() + "\n"
 
 
+def _assistant_image_as_deposit_text(assistant_file: AssistantFile) -> str:
+    lines = [
+        f"# {assistant_file.filename or '图片材料'}",
+        "",
+        "- 来源：验证工作台/AI 经营访谈上传图片",
+        f"- 会话 ID：{assistant_file.conversation_id}",
+        f"- 文件类型：{assistant_file.content_type or 'image'}",
+        f"- 文件大小：{assistant_file.file_size} bytes",
+        "",
+        "## 解析状态",
+        "",
+        "该材料为图片，当前系统已保存为会话附件并可沉淀到资料中心；尚未启用 OCR/视觉识别，正式验证前需要人工补充图片中的关键信息。",
+        "",
+    ]
+    return "\n".join(lines).strip() + "\n"
+
+
 def _previous_user_message(db: Session, assistant_message: AssistantMessage) -> AssistantMessage | None:
     return (
         db.query(AssistantMessage)
@@ -673,9 +831,14 @@ def ask(
     llm: LLMService = Depends(get_llm),
 ) -> AssistantAskResponse:
     tid = user.tenant_id
+    scope = tenant_scope(user)
     conversation = _get_or_create_conversation(
-        db, payload.conversation_id, tenant_scope(user), payload.question
+        db, payload.conversation_id, scope, payload.question
     )
+    validation_context, validation_project_id = _validation_card_context_for_assistant(
+        db, payload.validation_card_id, scope
+    )
+    effective_project_id = payload.project_id or validation_project_id
     file_context = _retrieve_conversation_file_context(
         db=db,
         embeddings=embeddings,
@@ -683,19 +846,23 @@ def ask(
         conversation_id=conversation.id,
         question=payload.question,
         attachments=payload.attachments,
-        tenant_id=tenant_scope(user),
+        tenant_id=scope,
     )
     project_context = _project_context_for_assistant(
-        db, payload.project_id, tenant_scope(user)
+        db, effective_project_id, scope
     )
-    project_history = project_service.history_context(db, payload.project_id) if payload.project_id else ""
+    project_history = (
+        project_service.history_context(db, effective_project_id)
+        if effective_project_id
+        else ""
+    )
     response = AssistantService(db, embeddings, core_store, llm).ask(
         question=payload.question,
-        company_context=_merge_context(payload.company_context, project_context),
+        company_context=_merge_context(payload.company_context, project_context, validation_context),
         file_context=file_context,
         conversation_history=_conversation_history_for_llm(db, conversation.id),
         project_history=project_history,
-        project_id=payload.project_id,
+        project_id=effective_project_id,
         tenant_id=tid,
     )
     response.conversation_id = conversation.id
@@ -734,7 +901,120 @@ def ask(
     return response
 
 
+@router.post("/ask/stream")
+def ask_stream(
+    payload: AssistantAskRequest,
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+    embeddings: EmbeddingProvider = Depends(get_embeddings),
+    core_store: VectorStore = Depends(get_core_store),
+    assistant_file_store: VectorStore = Depends(get_assistant_file_store),
+    llm: LLMService = Depends(get_llm),
+) -> StreamingResponse:
+    tid = user.tenant_id
+    scope = tenant_scope(user)
+    conversation = _get_or_create_conversation(
+        db, payload.conversation_id, scope, payload.question
+    )
+    validation_context, validation_project_id = _validation_card_context_for_assistant(
+        db, payload.validation_card_id, scope
+    )
+    effective_project_id = payload.project_id or validation_project_id
+
+    def event_stream():
+        try:
+            yield _sse("meta", {"conversation_id": conversation.id})
+            yield _sse("phase", {"message": "正在读取会话上下文..."})
+            file_context = _retrieve_conversation_file_context(
+                db=db,
+                embeddings=embeddings,
+                file_store=assistant_file_store,
+                conversation_id=conversation.id,
+                question=payload.question,
+                attachments=payload.attachments,
+                tenant_id=scope,
+            )
+            project_context = _project_context_for_assistant(db, effective_project_id, scope)
+            project_history = (
+                project_service.history_context(db, effective_project_id)
+                if effective_project_id
+                else ""
+            )
+            service = AssistantService(db, embeddings, core_store, llm)
+            for item in service.ask_stream(
+                question=payload.question,
+                company_context=_merge_context(payload.company_context, project_context, validation_context),
+                file_context=file_context,
+                conversation_history=_conversation_history_for_llm(db, conversation.id),
+                project_history=project_history,
+                project_id=effective_project_id,
+                tenant_id=tid,
+            ):
+                item_type = str(item.get("type") or "")
+                if item_type == "final":
+                    response = item["response"]
+                    if not isinstance(response, AssistantAskResponse):
+                        raise RuntimeError("流式问答返回了无效结果")
+                    response.conversation_id = conversation.id
+                    user_message = AssistantMessage(
+                        tenant_id=tid,
+                        conversation_id=conversation.id,
+                        role="user",
+                        content=payload.question.strip(),
+                        attachments=[
+                            attachment.model_dump(mode="json")
+                            for attachment in payload.attachments
+                        ],
+                    )
+                    assistant_message = AssistantMessage(
+                        tenant_id=tid,
+                        conversation_id=conversation.id,
+                        role="assistant",
+                        content=response.answer,
+                        node_refs=[node.model_dump(mode="json") for node in response.node_refs],
+                        suggested_questions=response.suggested_questions,
+                        tianji_simulation=(
+                            response.tianji_simulation.model_dump(mode="json")
+                            if response.tianji_simulation
+                            else None
+                        ),
+                        used_llm=response.used_llm,
+                        action_label=response.action_label,
+                        action_href=response.action_href,
+                    )
+                    if _is_placeholder_title(conversation.title):
+                        conversation.title = _title_from_question(payload.question)
+                    conversation.updated_at = utc_now()
+                    db.add(conversation)
+                    db.add(user_message)
+                    db.add(assistant_message)
+                    db.flush()
+                    response.assistant_message_id = assistant_message.id
+                    db.commit()
+                    yield _sse("final", response.model_dump(mode="json"))
+                    return
+                if item_type == "delta":
+                    yield _sse("delta", {"text": str(item.get("text") or "")})
+                    continue
+                if item_type == "phase":
+                    yield _sse("phase", {"message": str(item.get("message") or "")})
+                    continue
+        except Exception as exc:  # noqa: BLE001 流式响应需把错误发给前端
+            db.rollback()
+            yield _sse("error", {"detail": f"{type(exc).__name__}: {exc}"})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 _PARSE_ALLOWED_SUFFIXES = {".pdf", ".docx", ".txt", ".md", ".pptx", ".xlsx"}
+_PARSE_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 _PARSE_MAX_BYTES = 30 * 1024 * 1024
 
 
@@ -749,13 +1029,49 @@ def parse_file(
 ) -> AssistantParseFileResponse:
     """把上传文件解析为会话级临时知识库（不进入正式资料中心/人工审核）。"""
     suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in _PARSE_ALLOWED_SUFFIXES:
-        raise HTTPException(status_code=400, detail="不支持的文件类型，仅支持 PDF/DOCX/PPTX/XLSX/TXT/MD。")
+    if suffix not in _PARSE_ALLOWED_SUFFIXES and suffix not in _PARSE_IMAGE_SUFFIXES:
+        raise HTTPException(status_code=400, detail="不支持的文件类型，仅支持 PDF/DOCX/PPTX/XLSX/TXT/MD/PNG/JPG/WEBP。")
     data = file.file.read()
     if not data:
         raise HTTPException(status_code=400, detail="文件为空。")
     if len(data) > _PARSE_MAX_BYTES:
         raise HTTPException(status_code=400, detail="文件过大（上限 30MB）。")
+
+    tid = user.tenant_id
+    conversation = _get_or_create_conversation(
+        db, conversation_id, tenant_scope(user), question=None
+    )
+    if suffix in _PARSE_IMAGE_SUFFIXES:
+        image_dir = Path(get_settings().storage_dir) / "assistant-images"
+        image_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = re.sub(r"[^0-9A-Za-z._\-\u4e00-\u9fff]+", "_", file.filename or "image").strip("_")
+        image_path = image_dir / f"{uid()}_{safe_name or 'image'}"
+        image_path.write_bytes(data)
+        assistant_file = AssistantFile(
+            tenant_id=tid,
+            conversation_id=conversation.id,
+            filename=file.filename or "",
+            content_type=file.content_type,
+            file_size=len(data),
+            char_count=0,
+            chunk_count=0,
+            status="image_ready",
+        )
+        db.add(assistant_file)
+        conversation.updated_at = utc_now()
+        db.add(conversation)
+        db.commit()
+        db.refresh(assistant_file)
+        return AssistantParseFileResponse(
+            file_id=assistant_file.id,
+            conversation_id=conversation.id,
+            filename=file.filename or "",
+            chars=0,
+            chunk_count=0,
+            status=assistant_file.status,
+            truncated=False,
+            text="图片已上传；当前未启用 OCR/视觉识别，请在验证任务描述中补充图片关键信息。",
+        )
 
     tmp_path: Path | None = None
     try:
@@ -779,10 +1095,6 @@ def parse_file(
     if not parsed_chunks:
         raise HTTPException(status_code=400, detail="未能从该文件切分出可检索片段。")
 
-    tid = user.tenant_id
-    conversation = _get_or_create_conversation(
-        db, conversation_id, tenant_scope(user), question=None
-    )
     assistant_file = AssistantFile(
         tenant_id=tid,
         conversation_id=conversation.id,
@@ -911,7 +1223,8 @@ def deposit_file_to_expansion(
         .all()
     )
     if not chunks:
-        raise HTTPException(status_code=400, detail="该附件没有可沉淀的解析片段")
+        if not (assistant_file.content_type or "").startswith("image/") and assistant_file.status != "image_ready":
+            raise HTTPException(status_code=400, detail="该附件没有可沉淀的解析片段")
 
     settings = get_settings()
     deposit_dir = Path(settings.storage_dir) / "assistant-deposits"
@@ -920,7 +1233,12 @@ def deposit_file_to_expansion(
     if not safe_name:
         safe_name = "assistant-file"
     deposit_path = deposit_dir / f"{assistant_file.id}_{safe_name}.md"
-    deposit_path.write_text(_assistant_file_as_deposit_text(assistant_file, chunks), encoding="utf-8")
+    deposit_text = (
+        _assistant_file_as_deposit_text(assistant_file, chunks)
+        if chunks
+        else _assistant_image_as_deposit_text(assistant_file)
+    )
+    deposit_path.write_text(deposit_text, encoding="utf-8")
 
     source = ExpansionSource(
         tenant_id=assistant_file.tenant_id,

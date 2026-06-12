@@ -29,6 +29,7 @@ class AssistantAskRequest(BaseModel):
     company_context: str | None = None
     conversation_id: str | None = None
     project_id: str | None = None
+    validation_card_id: str | None = None
     attachments: list[AssistantAttachment] = Field(default_factory=list)
 
 

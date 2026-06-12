@@ -5,12 +5,19 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_llm, get_reviewer_pool
 from app.db.base import utc_now
 from app.db.models.auth import AuthUser
 from app.db.session import get_db
-from app.schemas.validation import ValidationCardCreate, ValidationCardOut, ValidationCardUpdate
+from app.schemas.validation import (
+    ValidationActionPatch,
+    ValidationCardCreate,
+    ValidationCardOut,
+    ValidationCardUpdate,
+    ValidationReviewSubmit,
+)
 from app.services import validation_card_service
+from app.services.llm import LLMService
 
 router = APIRouter(prefix="/api/validation-cards", tags=["validation-cards"])
 
@@ -20,8 +27,9 @@ def create_validation_card(
     payload: ValidationCardCreate,
     db: Session = Depends(get_db),
     user: AuthUser = Depends(get_current_user),
+    llm: LLMService = Depends(get_llm),
 ) -> ValidationCardOut:
-    card = validation_card_service.create_card(db, user, payload)
+    card = validation_card_service.create_card(db, user, payload, llm=llm)
     return ValidationCardOut.model_validate(card)
 
 
@@ -85,4 +93,38 @@ def update_validation_card(
     db.add(card)
     db.commit()
     db.refresh(card)
+    return ValidationCardOut.model_validate(card)
+
+
+@router.patch("/{card_id}/actions/{action_index}", response_model=ValidationCardOut)
+def update_validation_action(
+    card_id: str,
+    action_index: int,
+    payload: ValidationActionPatch,
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+    llm: LLMService = Depends(get_llm),
+    reviewers: tuple[LLMService, ...] = Depends(get_reviewer_pool),
+) -> ValidationCardOut:
+    card = validation_card_service.get_owned_card(db, card_id, user)
+    if not card:
+        raise HTTPException(status_code=404, detail="验证卡不存在")
+    try:
+        card = validation_card_service.update_action(db, card, action_index, payload, llm=llm, reviewers=reviewers)
+    except IndexError:
+        raise HTTPException(status_code=404, detail="验证动作不存在") from None
+    return ValidationCardOut.model_validate(card)
+
+
+@router.post("/{card_id}/review", response_model=ValidationCardOut)
+def submit_validation_review(
+    card_id: str,
+    payload: ValidationReviewSubmit,
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+) -> ValidationCardOut:
+    card = validation_card_service.get_owned_card(db, card_id, user)
+    if not card:
+        raise HTTPException(status_code=404, detail="验证卡不存在")
+    card = validation_card_service.submit_review(db, card, payload)
     return ValidationCardOut.model_validate(card)

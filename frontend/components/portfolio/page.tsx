@@ -6,9 +6,11 @@ import { Card } from "@/components/card";
 import { Icon } from "@/components/icon";
 import {
   ApiError,
+  decisionCaseApi,
   projectApi,
   reportsApi,
   validationCardApi,
+  type DecisionCase,
   type DiagnosisReport,
   type Project,
   type ProjectStatus,
@@ -76,6 +78,7 @@ export function PortfolioPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [reports, setReports] = useState<DiagnosisReport[]>([]);
   const [cards, setCards] = useState<ValidationCard[]>([]);
+  const [cases, setCases] = useState<DecisionCase[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -87,14 +90,16 @@ export function PortfolioPage() {
     setLoading(true);
     setError(null);
     try {
-      const [projectRows, reportRows, cardRows] = await Promise.all([
+      const [projectRows, reportRows, cardRows, caseRows] = await Promise.all([
         projectApi.list(),
         reportsApi.list(),
         validationCardApi.list(),
+        decisionCaseApi.list(12),
       ]);
       setProjects(projectRows);
       setReports(reportRows);
       setCards(cardRows);
+      setCases(caseRows);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "经营档案加载失败");
     } finally {
@@ -122,9 +127,9 @@ export function PortfolioPage() {
       { label: "经营档案", value: projects.length, unit: "个", icon: "archive", tone: "bg-indigo-50 text-brand" },
       { label: "验证中项目", value: active, unit: "个", icon: "target", tone: "bg-blue-50 text-blue-600" },
       { label: "诊断报告", value: reports.length, unit: "份", icon: "file-bar-chart", tone: "bg-emerald-50 text-emerald-600" },
-      { label: "验证卡", value: cards.length, unit: "张", icon: "clipboard-check", tone: "bg-orange-50 text-orange-500" },
+      { label: "决策病例", value: cases.length, unit: "个", icon: "file-check", tone: "bg-orange-50 text-orange-500" },
     ];
-  }, [cards.length, projects, reports.length]);
+  }, [cases.length, projects, reports.length]);
 
   const timeline = useMemo(() => {
     const reportItems = reports.slice(0, 6).map((report) => ({
@@ -369,6 +374,23 @@ export function PortfolioPage() {
 
             <Card className="overflow-hidden">
               <div className="border-b border-line px-5 py-4">
+                <h2 className="text-[16px] font-black text-ink">决策病例库</h2>
+                <p className="mt-1 text-[12px] text-slate-400">第7天复盘后沉淀的结果标签与方法资产。</p>
+              </div>
+              <div className="space-y-3 p-5">
+                {cases.slice(0, 4).map((item) => (
+                  <DecisionCaseCard key={item.id} item={item} />
+                ))}
+                {cases.length === 0 && (
+                  <div className="rounded-2xl bg-slate-50 px-4 py-6 text-center text-[13px] text-slate-400">
+                    暂无已复盘病例
+                  </div>
+                )}
+              </div>
+            </Card>
+
+            <Card className="overflow-hidden">
+              <div className="border-b border-line px-5 py-4">
                 <h2 className="text-[16px] font-black text-ink">本周验证动作</h2>
                 <p className="mt-1 text-[12px] text-slate-400">从 AI 回答和诊断报告沉淀出的下一步验证。</p>
               </div>
@@ -394,6 +416,11 @@ function ValidationFeedbackCard({ card, onSaved }: { card: ValidationCard; onSav
   const [result, setResult] = useState<ValidationCard["result"]>(card.result ?? null);
   const [actualOutcome, setActualOutcome] = useState(card.actual_outcome || "");
   const [learnings, setLearnings] = useState(card.learnings || "");
+  const [interviewCount, setInterviewCount] = useState("");
+  const [paidIntentCount, setPaidIntentCount] = useState("");
+  const [rejectionReasons, setRejectionReasons] = useState("");
+  const [channelQuotes, setChannelQuotes] = useState("");
+  const [estimatedCac, setEstimatedCac] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -405,12 +432,17 @@ function ValidationFeedbackCard({ card, onSaved }: { card: ValidationCard; onSav
     setSaving(true);
     setMessage(null);
     try {
-      await validationCardApi.update(card.id, {
-        result,
+      await validationCardApi.submitReview(card.id, {
+        final_decision: result === "achieved" ? "continue" : result === "not_achieved" ? "pause" : "adjust",
+        interview_count: toNumber(interviewCount),
+        paid_intent_count: toNumber(paidIntentCount),
+        rejection_reasons: splitList(rejectionReasons),
+        channel_quotes: splitList(channelQuotes),
+        estimated_cac: estimatedCac.trim(),
         actual_outcome: actualOutcome.trim(),
         learnings: learnings.trim(),
       });
-      setMessage("已回填");
+      setMessage("已完成第7天复盘");
       await onSaved();
     } catch (error) {
       setMessage(error instanceof ApiError ? error.message : "回填失败");
@@ -447,6 +479,38 @@ function ValidationFeedbackCard({ card, onSaved }: { card: ValidationCard; onSav
             </option>
           ))}
         </select>
+        <div className="grid grid-cols-2 gap-2">
+          <input
+            value={interviewCount}
+            onChange={(event) => setInterviewCount(event.target.value)}
+            className="h-9 rounded-xl border border-line bg-white px-3 text-[12px] outline-none placeholder:text-slate-400 focus:border-brand/50"
+            placeholder="访谈人数"
+          />
+          <input
+            value={paidIntentCount}
+            onChange={(event) => setPaidIntentCount(event.target.value)}
+            className="h-9 rounded-xl border border-line bg-white px-3 text-[12px] outline-none placeholder:text-slate-400 focus:border-brand/50"
+            placeholder="付费意向数"
+          />
+        </div>
+        <input
+          value={estimatedCac}
+          onChange={(event) => setEstimatedCac(event.target.value)}
+          className="h-9 rounded-xl border border-line bg-white px-3 text-[12px] outline-none placeholder:text-slate-400 focus:border-brand/50"
+          placeholder="预估 CAC，例如：280元/线索"
+        />
+        <textarea
+          value={rejectionReasons}
+          onChange={(event) => setRejectionReasons(event.target.value)}
+          className="min-h-[52px] resize-none rounded-xl border border-line bg-white px-3 py-2 text-[12px] leading-5 outline-none placeholder:text-slate-400 focus:border-brand/50"
+          placeholder="拒绝原因，用逗号或换行分隔"
+        />
+        <textarea
+          value={channelQuotes}
+          onChange={(event) => setChannelQuotes(event.target.value)}
+          className="min-h-[52px] resize-none rounded-xl border border-line bg-white px-3 py-2 text-[12px] leading-5 outline-none placeholder:text-slate-400 focus:border-brand/50"
+          placeholder="渠道报价/合作条件，用逗号或换行分隔"
+        />
         <textarea
           value={actualOutcome}
           onChange={(event) => setActualOutcome(event.target.value)}
@@ -469,11 +533,56 @@ function ValidationFeedbackCard({ card, onSaved }: { card: ValidationCard; onSav
           className="flex h-8 items-center gap-1.5 rounded-lg bg-white px-3 text-[12px] font-bold text-brand disabled:opacity-50"
         >
           <Icon name={saving ? "refresh" : "check"} className={cn("h-3.5 w-3.5", saving && "animate-spin")} />
-          保存回填
+          提交复盘
         </button>
       </div>
     </div>
   );
+}
+
+function DecisionCaseCard({ item }: { item: DecisionCase }) {
+  const tone =
+    item.decision === "继续"
+      ? "bg-emerald-50 text-emerald-600"
+      : item.decision === "暂停"
+        ? "bg-rose-50 text-rose-500"
+        : "bg-orange-50 text-orange-500";
+  return (
+    <div className="rounded-2xl border border-line bg-white p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-[13px] font-black text-[#172452]">{item.title}</div>
+          <div className="mt-1 text-[11px] font-semibold text-slate-400">
+            证据等级 {item.evidence_grade}
+            {item.saved_investment_estimate ? ` · 节省投入 ${item.saved_investment_estimate}` : ""}
+          </div>
+        </div>
+        <span className={cn("shrink-0 rounded-md px-2 py-1 text-[11px] font-black", tone)}>{item.decision}</span>
+      </div>
+      <p className="mt-3 line-clamp-2 text-[12px] leading-5 text-slate-500">
+        {item.key_learning || item.final_outcome || item.biggest_uncertainty || "已完成复盘，等待沉淀方法资产。"}
+      </p>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {item.assets.slice(0, 4).map((asset) => (
+          <span key={asset.kind} className="rounded-lg bg-[#f0edff] px-2 py-1 text-[10.5px] font-bold text-brand">
+            {asset.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function splitList(value: string) {
+  return value
+    .split(/[\n,，;；]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function toNumber(value: string) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
 }
 
 function Field({

@@ -28,6 +28,7 @@ from app.db.models.methodology import (
 )
 from app.db.models.system import SystemSettings
 from app.db.models.tenant import Tenant
+from app.db.models.tianji import TianjiEvidenceRecord, TianjiHypothesis, TianjiPrediction
 
 __all__ = [
     "Tenant",
@@ -56,4 +57,7 @@ __all__ = [
     "Feedback",
     "Project",
     "ValidationCard",
+    "TianjiHypothesis",
+    "TianjiEvidenceRecord",
+    "TianjiPrediction",
 ]

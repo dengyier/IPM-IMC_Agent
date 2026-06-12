@@ -17,10 +17,19 @@ class Settings(BaseSettings):
     expansion_collection: str = "expansion_chunks"
     assistant_file_collection: str = "assistant_file_chunks"
 
-    # DeepSeek（OpenAI 兼容）
+    # DeepSeek（OpenAI 兼容）——主生成模型
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-pro"
+
+    # BACH 异构评审模型池（OpenAI 兼容）。未配 key 的 profile 自动跳过，
+    # 评审退化为主模型单评（reviewer_spread 恒为 0）。
+    reviewer_a_api_key: str | None = None
+    reviewer_a_base_url: str = "https://api.moonshot.cn/v1"
+    reviewer_a_model: str = "kimi-k2.6"
+    reviewer_b_api_key: str | None = None
+    reviewer_b_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
+    reviewer_b_model: str = "glm-5"
 
     # 腾讯云短信验证码
     tencentcloud_secret_id: str | None = None

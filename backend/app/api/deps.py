@@ -13,7 +13,7 @@ from app.db.models.auth import AuthUser
 from app.db.session import get_db
 from app.services.auth_service import ROLE_SUPER_ADMIN, AuthService, can_review
 from app.services.embeddings import EmbeddingProvider, build_embedding_provider
-from app.services.llm import LLMService
+from app.services.llm import LLMService, build_reviewer_pool
 from app.services.storage import LocalStorage
 from app.services.vector_store import VectorStore
 
@@ -56,6 +56,12 @@ def get_assistant_file_store() -> VectorStore:
 @lru_cache
 def get_llm() -> LLMService:
     return LLMService(get_settings())
+
+
+@lru_cache
+def get_reviewer_pool() -> tuple[LLMService, ...]:
+    """BACH 异构评审模型池（不含主模型）；未配置时为空元组。"""
+    return tuple(build_reviewer_pool(get_settings()))
 
 
 @lru_cache

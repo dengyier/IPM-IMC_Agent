@@ -3,9 +3,12 @@
   "configurations": [
     {
       "name": "frontend",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "frontend", "run", "dev"],
-      "port": 3005
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd frontend && npx next dev --hostname 127.0.0.1 --port 13006"
+      ],
+      "port": 13006
     }
   ]
 }

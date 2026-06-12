@@ -48,7 +48,15 @@ function buildProjectCompanyContext(project: Project | null): string | undefined
   return `当前经营档案上下文：\n${rows.join("\n")}`;
 }
 
-export function HomeWorkspace({ initialProjectId = null }: { initialProjectId?: string | null }) {
+export function HomeWorkspace({
+  initialProjectId = null,
+  initialValidationCardId = null,
+  initialFocus = false,
+}: {
+  initialProjectId?: string | null;
+  initialValidationCardId?: string | null;
+  initialFocus?: boolean;
+}) {
   const [convOpen, setConvOpen] = useState(false);
   const [projectContext, setProjectContext] = useState<Project | null>(null);
   const [projectLoading, setProjectLoading] = useState(false);
@@ -101,6 +109,8 @@ export function HomeWorkspace({ initialProjectId = null }: { initialProjectId?: 
         projectLoading={projectLoading}
         projectError={projectError}
         projectCompanyContext={projectCompanyContext}
+        validationCardId={initialValidationCardId}
+        initialFocus={initialFocus}
       />
       {convOpen && <ConversationPanel onCollapse={() => setConvOpen(false)} />}
     </div>
@@ -114,6 +124,8 @@ function ChatMain({
   projectLoading,
   projectError,
   projectCompanyContext,
+  validationCardId,
+  initialFocus,
 }: {
   convOpen: boolean;
   onToggleConv: () => void;
@@ -121,6 +133,8 @@ function ChatMain({
   projectLoading: boolean;
   projectError: string | null;
   projectCompanyContext?: string;
+  validationCardId?: string | null;
+  initialFocus?: boolean;
 }) {
   const {
     input,
@@ -146,6 +160,7 @@ function ChatMain({
   const [depositingFileId, setDepositingFileId] = useState<string | null>(null);
   const [depositingMessageId, setDepositingMessageId] = useState<string | null>(null);
   const canSend = input.trim().length > 0 && !loading && !attaching;
+  const streamingMessageActive = loading && messages[messages.length - 1]?.id.startsWith("a-stream-");
   const hasConversation = messages.some((message) => message.role === "user");
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeConversationId),
@@ -156,6 +171,10 @@ function ChatMain({
     if (!isPlaceholderTitle(activeConversation.title)) return activeConversation.title;
     return titleFromActiveMessages(messages) || activeConversation.title;
   }, [activeConversation, messages]);
+
+  useEffect(() => {
+    if (initialFocus) setFocusOpen(true);
+  }, [initialFocus]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -197,7 +216,13 @@ function ChatMain({
           truncated: false,
         }]
       : undefined;
-    await sendQuestion(question, projectCompanyContext, messageAttachments, projectContext?.id ?? null);
+    await sendQuestion(
+      question,
+      projectCompanyContext,
+      messageAttachments,
+      projectContext?.id ?? null,
+      validationCardId ?? null
+    );
     setAttachment(null);
   }
 
@@ -315,9 +340,11 @@ function ChatMain({
               projectContext={projectContext}
               projectLoading={projectLoading}
               projectError={projectError}
+              validationCardId={validationCardId}
             />
           ) : (
             <div className="mx-auto w-full max-w-[900px] space-y-3 py-4 md:space-y-4 md:py-6">
+              {validationCardId && <ValidationContextStrip validationCardId={validationCardId} />}
               {(projectContext || projectLoading || projectError) && (
                 <ProjectContextStrip
                   project={projectContext}
@@ -343,7 +370,7 @@ function ChatMain({
                   projectId={projectContext?.id ?? null}
                 />
               ))}
-              {loading && (
+              {loading && !streamingMessageActive && (
                 <div className="max-w-[820px] rounded-2xl border border-line bg-white px-4 py-3.5 text-[13px] text-slate-500 shadow-[0_10px_24px_rgba(30,58,138,0.05)]">
                   正在检索天机AI核心知识节点，并调用 DeepSeek 生成解决方案...
                 </div>
@@ -443,6 +470,7 @@ function ChatMain({
           onClose={() => setFocusOpen(false)}
           projectCompanyContext={projectCompanyContext}
           projectId={projectContext?.id ?? null}
+          validationCardId={validationCardId}
         />
       )}
     </>
@@ -456,6 +484,7 @@ function HomeHero({
   projectContext,
   projectLoading,
   projectError,
+  validationCardId,
 }: {
   displayName: string;
   loading: boolean;
@@ -463,6 +492,7 @@ function HomeHero({
   projectContext: Project | null;
   projectLoading: boolean;
   projectError: string | null;
+  validationCardId?: string | null;
 }) {
   return (
     <div className="mx-auto flex min-h-full max-w-[760px] flex-col items-center justify-center py-20 text-center md:py-10">
@@ -482,6 +512,7 @@ function HomeHero({
           error={projectError}
         />
       )}
+      {validationCardId && <ValidationContextCard validationCardId={validationCardId} />}
       <div className="mt-8 grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
         {suggestionChips.map((question) => (
           <button
@@ -555,6 +586,31 @@ function ProjectContextCard({
   );
 }
 
+function ValidationContextCard({ validationCardId }: { validationCardId: string }) {
+  return (
+    <div className="mt-3 w-full rounded-2xl border border-[#dcd6ff] bg-[#fbfaff] px-4 py-3 text-left shadow-[0_10px_28px_rgba(91,75,255,0.06)]">
+      <div className="flex items-start gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#f0edff] text-brand">
+          <Icon name="target" className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-black text-[#172452]">已带入当前验证任务</div>
+          <p className="mt-1 text-[12px] leading-5 text-slate-500">
+            本轮 AI 经营访谈会读取验证内容、决策树任务、证据状态和 BACH 审判结果。
+          </p>
+          <a
+            href={`/validation-cards/${validationCardId}`}
+            className="mt-2 inline-flex items-center gap-1 text-[12px] font-black text-brand"
+          >
+            查看验证任务
+            <Icon name="chevron-right" className="h-3.5 w-3.5" />
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProjectContextStrip({
   project,
   loading,
@@ -590,6 +646,31 @@ function ProjectContextStrip({
       <p className="mt-1 line-clamp-2 text-slate-500">
         {project.current_problem || project.target_customer || "本轮对话会自动带入该经营档案上下文。"}
       </p>
+    </div>
+  );
+}
+
+function ValidationContextStrip({ validationCardId }: { validationCardId: string }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#dcd6ff] bg-[#fbfaff] px-4 py-3 text-[13px] shadow-[0_10px_24px_rgba(30,58,138,0.05)]">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#f0edff] text-brand">
+          <Icon name="target" className="h-4 w-4" />
+        </span>
+        <div className="min-w-0">
+          <div className="font-black text-[#172452]">已带入验证任务上下文</div>
+          <div className="truncate text-[12px] font-semibold text-slate-500">
+            AI 会围绕当前验证内容、任务节点、证据和 BACH 审判继续访谈。
+          </div>
+        </div>
+      </div>
+      <a
+        href={`/validation-cards/${validationCardId}`}
+        className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white px-2.5 text-[12px] font-black text-brand hover:bg-[#f7f5ff]"
+      >
+        任务详情
+        <Icon name="chevron-right" className="h-3.5 w-3.5" />
+      </a>
     </div>
   );
 }
@@ -1153,10 +1234,12 @@ function AssistantFocusMode({
   onClose,
   projectCompanyContext,
   projectId,
+  validationCardId,
 }: {
   onClose: () => void;
   projectCompanyContext?: string;
   projectId?: string | null;
+  validationCardId?: string | null;
 }) {
   const {
     input,
@@ -1180,6 +1263,7 @@ function AssistantFocusMode({
   const [depositingMessageId, setDepositingMessageId] = useState<string | null>(null);
   const { user } = useAuth();
   const canSend = input.trim().length > 0 && !loading;
+  const streamingMessageActive = loading && messages[messages.length - 1]?.id.startsWith("a-stream-");
   const filteredConversations = useMemo(() => {
     const keyword = searchKeyword.trim().toLowerCase();
     if (!keyword) return conversations;
@@ -1195,7 +1279,7 @@ function AssistantFocusMode({
     if (event.key !== "Enter" || event.shiftKey) return;
     event.preventDefault();
     if (canSend) {
-      sendQuestion(undefined, projectCompanyContext, undefined, projectId ?? null);
+      sendQuestion(undefined, projectCompanyContext, undefined, projectId ?? null, validationCardId ?? null);
     }
   }
 
@@ -1334,11 +1418,13 @@ function AssistantFocusMode({
                     </button>
                   ))}
                 </div>
+                {validationCardId && <ValidationContextCard validationCardId={validationCardId} />}
               </div>
             )}
 
             {hasConversation && (
               <div className="mx-auto max-w-[900px] space-y-7">
+                {validationCardId && <ValidationContextStrip validationCardId={validationCardId} />}
                 {messages.map((message) => (
                   <FocusMessage
                     key={message.id}
@@ -1352,7 +1438,7 @@ function AssistantFocusMode({
                     projectId={projectId}
                   />
                 ))}
-                {loading && (
+                {loading && !streamingMessageActive && (
                   <div className="flex gap-4">
                     <div className="brand-gradient flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white">
                       <Icon name="boxes" className="h-4 w-4" />
@@ -1372,7 +1458,7 @@ function AssistantFocusMode({
               onSubmit={(event) => {
                 event.preventDefault();
                 if (canSend) {
-                  sendQuestion(undefined, projectCompanyContext, undefined, projectId ?? null);
+                  sendQuestion(undefined, projectCompanyContext, undefined, projectId ?? null, validationCardId ?? null);
                 }
               }}
               className="mx-auto flex max-w-[980px] items-end gap-3 rounded-[24px] border border-line bg-white py-3 pl-4 pr-3 shadow-[0_18px_60px_rgba(15,23,42,0.11)] transition-colors focus-within:border-brand/50"

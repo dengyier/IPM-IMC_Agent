@@ -6,22 +6,33 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 
 from app.core.config import Settings
 
 
 class LLMService:
-    def __init__(self, settings: Settings):
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
+    ):
+        """默认用 DeepSeek 主模型；传入凭证覆盖即可指向任意 OpenAI 兼容服务（评审模型池用）。"""
         self.settings = settings
-        self.model = settings.deepseek_model
+        self.model = model or settings.deepseek_model
+        self._api_key = api_key if api_key is not None else settings.deepseek_api_key
+        self._base_url = base_url or settings.deepseek_base_url
         self._client = None
-        if settings.deepseek_api_key:
+        if self._api_key:
             try:
                 from openai import OpenAI
 
                 self._client = OpenAI(
-                    api_key=settings.deepseek_api_key,
-                    base_url=settings.deepseek_base_url,
+                    api_key=self._api_key,
+                    base_url=self._base_url,
                     timeout=90,
                 )
             except Exception:
@@ -38,9 +49,9 @@ class LLMService:
         """
         import time
 
-        if not self.settings.deepseek_api_key:
+        if not self._api_key:
             return {"ok": False, "model": self.model, "latency_ms": None,
-                    "detail": "未配置 DEEPSEEK_API_KEY"}
+                    "detail": "未配置 API key"}
         if not self._client:
             return {"ok": False, "model": self.model, "latency_ms": None,
                     "detail": "LLM 客户端初始化失败（openai 依赖或 base_url 异常）"}
@@ -109,3 +120,44 @@ class LLMService:
             return resp.choices[0].message.content
         except Exception:
             return None
+
+    def chat_text_stream(
+        self, system_prompt: str, user_prompt: str, temperature: float = 0.3
+    ) -> Iterator[str]:
+        """逐段返回文本 token；不可用或异常时产出空流。"""
+        if not self._client:
+            return
+        try:
+            stream = self._client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=temperature,
+                stream=True,
+            )
+            for chunk in stream:
+                delta = chunk.choices[0].delta.content if chunk.choices else None
+                if delta:
+                    yield delta
+        except Exception:
+            return
+
+
+def build_reviewer_pool(settings: Settings) -> list["LLMService"]:
+    """BACH 异构评审模型池：只返回配置了 key 且初始化成功的评审实例。
+
+    独立性来自模型家族异构（v2 算法 §7），同模型多角色不计入评审。
+    """
+    pool: list[LLMService] = []
+    for api_key, base_url, model in (
+        (settings.reviewer_a_api_key, settings.reviewer_a_base_url, settings.reviewer_a_model),
+        (settings.reviewer_b_api_key, settings.reviewer_b_base_url, settings.reviewer_b_model),
+    ):
+        if not api_key:
+            continue
+        service = LLMService(settings, api_key=api_key, base_url=base_url, model=model)
+        if service.available:
+            pool.append(service)
+    return pool

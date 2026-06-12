@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 import re
 
 from sqlalchemy.orm import Session
@@ -156,6 +157,114 @@ class AssistantService:
             tianji_simulation=tianji_simulation,
         )
 
+    def ask_stream(
+        self,
+        question: str,
+        company_context: str | None = None,
+        file_context: str | None = None,
+        conversation_history: list[dict[str, str]] | None = None,
+        project_history: str | None = None,
+        project_id: str | None = None,
+        tenant_id: str | None = None,
+    ) -> Iterator[dict[str, object]]:
+        """生成问答事件流。
+
+        事件 type:
+        - phase: 阶段性状态文案
+        - delta: 可直接追加到助手气泡的文本片段
+        - final: 完整 AssistantAskResponse，供落库与前端补齐元数据
+        """
+        full_question = question.strip()
+        history_text = self._history_to_text(conversation_history or [])
+
+        if not company_context and not file_context and not history_text and self._triage(full_question) == "casual":
+            response = self._casual_response(full_question)
+            yield {"type": "phase", "message": "正在组织回复..."}
+            for chunk in self._chunk_text(response.answer):
+                yield {"type": "delta", "text": chunk}
+            yield {"type": "final", "response": response}
+            return
+
+        yield {"type": "phase", "message": "正在检索天机AI核心知识节点..."}
+        if company_context:
+            full_question = f"{full_question}\n\n企业补充背景：{company_context.strip()}"
+        if file_context:
+            full_question = f"{full_question}\n\n当前会话上传文件的相关片段：\n{file_context.strip()}"
+        if history_text:
+            full_question = f"前序对话上下文：\n{history_text}\n\n当前追问：{full_question}"
+
+        routing = ProblemRoutingService(self.db).route(full_question)
+        context = ContextFusionService(self.db, self.embeddings, self.core_store).fuse(
+            full_question,
+            routing,
+            tenant_id=tenant_id,
+        )
+
+        yield {"type": "phase", "message": "正在进行天机多路径推演..."}
+        tianji_simulation = TianjiSimulationService(self.llm, embeddings=self.embeddings).run(
+            question=question,
+            project_context=company_context,
+            file_context=file_context,
+            history_text=history_text,
+            project_history=project_history,
+            routing=routing,
+            context=context,
+            mode="chat",
+        )
+
+        yield {"type": "phase", "message": "正在生成经营判断..."}
+        user_prompt = self._build_llm_user_prompt(
+            question=question,
+            company_context=company_context,
+            file_context=file_context,
+            history_text=history_text,
+            intent=routing.intent,
+            context=context,
+            tianji_simulation=tianji_simulation,
+        )
+
+        llm_answer_parts: list[str] = []
+        if self.llm.available:
+            for delta in self.llm.chat_text_stream(ASSISTANT_SYSTEM, user_prompt, temperature=0.45):
+                llm_answer_parts.append(delta)
+                yield {"type": "delta", "text": delta}
+        llm_answer = "".join(llm_answer_parts).strip() or None
+
+        if not llm_answer:
+            fallback = self._plain_text_answer(self._fallback_answer(question, routing.intent, context))
+            for chunk in self._chunk_text(fallback):
+                yield {"type": "delta", "text": chunk}
+            answer = fallback
+        else:
+            answer = self._plain_text_answer(llm_answer)
+
+        action_label, action_href = self._next_action(question, routing.intent)
+        suggested_questions = self._suggested_questions(
+            question=question,
+            intent=routing.intent,
+            context=context,
+            answer=answer,
+        )
+        response = AssistantAskResponse(
+            answer=answer,
+            intent=routing.intent,
+            used_llm=bool(llm_answer),
+            action_label=action_label,
+            action_href=action_href,
+            node_refs=[
+                AssistantNodeRef(
+                    id=n.id,
+                    name=n.node_name,
+                    category=n.node_category,
+                    score=n.score,
+                )
+                for n in context.nodes[:6]
+            ],
+            suggested_questions=suggested_questions,
+            tianji_simulation=tianji_simulation,
+        )
+        yield {"type": "final", "response": response}
+
     # ------------------------------------------------------------------ #
     # 闲聊分流
     # ------------------------------------------------------------------ #
@@ -218,7 +327,27 @@ class AssistantService:
     ) -> str | None:
         if not self.llm.available:
             return None
+        user_prompt = self._build_llm_user_prompt(
+            question=question,
+            company_context=company_context,
+            file_context=file_context,
+            history_text=history_text,
+            intent=intent,
+            context=context,
+            tianji_simulation=tianji_simulation,
+        )
+        return self.llm.chat_text(ASSISTANT_SYSTEM, user_prompt, temperature=0.45)
 
+    def _build_llm_user_prompt(
+        self,
+        question: str,
+        company_context: str | None,
+        file_context: str | None,
+        history_text: str,
+        intent: str,
+        context: FusedContext,
+        tianji_simulation: TianjiSimulationResult | None = None,
+    ) -> str:
         method_points = [
             {
                 "node": n.node_name,
@@ -253,7 +382,12 @@ class AssistantService:
             "简单问题就简短回应，不要为了凑结构而展开，也不要用套话开场。"
             "最终输出只能是普通中文正文，不要输出 Markdown，不要出现 ###、**、项目符号或表格。"
         )
-        return self.llm.chat_text(ASSISTANT_SYSTEM, user_prompt, temperature=0.45)
+        return user_prompt
+
+    @staticmethod
+    def _chunk_text(text: str, size: int = 28) -> Iterator[str]:
+        for index in range(0, len(text), size):
+            yield text[index:index + size]
 
     @staticmethod
     def _simulation_for_prompt(simulation: TianjiSimulationResult | None) -> dict:

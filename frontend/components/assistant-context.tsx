@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import {
   assistantApi,
   type AssistantAttachment,
+  type AssistantAskResponse,
   type AssistantConversationRecord,
   type AssistantDepositFileResult,
   type AssistantDepositMessageResult,
@@ -43,7 +44,8 @@ type AssistantContextValue = {
     question?: string,
     companyContext?: string,
     attachments?: AssistantAttachment[],
-    projectId?: string | null
+    projectId?: string | null,
+    validationCardId?: string | null
   ) => Promise<void>;
   createConversation: () => Promise<void>;
   ensureActiveConversation: () => Promise<string | null>;
@@ -319,7 +321,8 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       question?: string,
       companyContext?: string,
       attachments?: AssistantAttachment[],
-      projectId?: string | null
+      projectId?: string | null,
+      validationCardId?: string | null
     ) => {
       const text = (question ?? input).trim();
       if (!text || loadingConversationId) return;
@@ -345,8 +348,14 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         content: text,
         attachments,
       };
+      const streamMessageId = `a-stream-${Date.now()}`;
+      const optimisticAssistantMessage: AssistantMessage = {
+        id: streamMessageId,
+        role: "assistant",
+        content: "正在读取会话上下文...",
+      };
       const baseMessages = messageCacheRef.current[conversationId] || messages;
-      const optimisticMessages = [...baseMessages, optimisticUserMessage];
+      const optimisticMessages = [...baseMessages, optimisticUserMessage, optimisticAssistantMessage];
 
       setConversations((prev) => {
         const next = prev.map((row) =>
@@ -370,32 +379,68 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       rememberInput("", conversationId);
       setLoadingConversationId(conversationId);
       try {
-        const result = await assistantApi.ask(text, companyContext, apiConversationId, attachments, projectId);
-        const nextConversationId = result.conversation_id || conversationId;
+        let result: AssistantAskResponse | null = null;
+        let streamedAnswer = "";
+        let streamConversationId: string | null = null;
+        const updateStreamMessage = (updater: (message: AssistantMessage) => AssistantMessage) => {
+          const currentMessages = messageCacheRef.current[conversationId] || optimisticMessages;
+          const nextMessages = currentMessages.map((message) =>
+            message.id === streamMessageId ? updater(message) : message
+          );
+          const nextCache = { ...messageCacheRef.current, [conversationId]: nextMessages };
+          messageCacheRef.current = nextCache;
+          setMessageCache(nextCache);
+          if (activeConversationIdRef.current === conversationId) {
+            setMessages(nextMessages);
+          }
+        };
+
+        await assistantApi.askStream(text, companyContext, apiConversationId, attachments, projectId, validationCardId, {
+          onMeta: (data) => {
+            streamConversationId = data.conversation_id || null;
+          },
+          onPhase: (data) => {
+            if (streamedAnswer) return;
+            updateStreamMessage((message) => ({ ...message, content: data.message || message.content }));
+          },
+          onDelta: (data) => {
+            streamedAnswer += data.text || "";
+            updateStreamMessage((message) => ({ ...message, content: streamedAnswer }));
+          },
+          onFinal: (data) => {
+            result = data;
+          },
+        });
+        const finalResult = result as AssistantAskResponse | null;
+        if (!finalResult) throw new Error("流式问答未返回完整结果");
+        const nextConversationId = finalResult.conversation_id || conversationId;
         const assistantMessage: AssistantMessage = {
-          id: result.assistant_message_id || `a-${Date.now()}`,
+          id: finalResult.assistant_message_id || `a-${Date.now()}`,
           role: "assistant",
-          content: result.answer,
-          usedLlm: result.used_llm,
-          nodeRefs: result.node_refs,
-          suggestedQuestions: result.suggested_questions,
-          tianjiSimulation: result.tianji_simulation ?? null,
+          content: finalResult.answer,
+          usedLlm: finalResult.used_llm,
+          nodeRefs: finalResult.node_refs,
+          suggestedQuestions: finalResult.suggested_questions,
+          tianjiSimulation: finalResult.tianji_simulation ?? null,
           action:
-            result.action_label && result.action_href
-              ? { label: result.action_label, href: result.action_href }
+            finalResult.action_label && finalResult.action_href
+              ? { label: finalResult.action_label, href: finalResult.action_href }
               : undefined,
         };
         const cachedMessages = messageCacheRef.current[conversationId] || optimisticMessages;
-        const nextMessages = [...cachedMessages, assistantMessage];
+        const nextMessages = cachedMessages.map((message) =>
+          message.id === streamMessageId ? assistantMessage : message
+        );
 
-        if (nextConversationId !== conversationId) {
+        if ((streamConversationId || nextConversationId) !== conversationId) {
+          const realConversationId = streamConversationId || nextConversationId;
           setConversations((prev) => {
             let replaced = false;
             const next = prev.map((row) => {
               if (row.id !== conversationId) return row;
               replaced = true;
               return {
-                id: nextConversationId,
+                id: realConversationId,
                 title: nextTitle,
                 message_count: countConversationMessages(nextMessages),
                 created_at: row.created_at || now,
@@ -407,7 +452,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
               ? next
               : [
                   {
-                    id: nextConversationId,
+                    id: realConversationId,
                     title: nextTitle,
                     message_count: countConversationMessages(nextMessages),
                     created_at: now,
@@ -420,17 +465,18 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
             return finalRows;
           });
           setMessageCache((prev) => {
-            const next = { ...prev, [nextConversationId]: nextMessages };
+            const next = { ...prev, [realConversationId]: nextMessages };
             delete next[conversationId];
+            messageCacheRef.current = next;
             return next;
           });
           setInputDrafts((prev) => {
-            const next = { ...prev, [nextConversationId]: "" };
+            const next = { ...prev, [realConversationId]: "" };
             delete next[conversationId];
             return next;
           });
           if (activeConversationIdRef.current === conversationId) {
-            setActiveConversation(nextConversationId);
+            setActiveConversation(realConversationId);
             setMessages(nextMessages);
           }
         } else {
@@ -465,7 +511,11 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
               ? `助手服务暂时不可用：${error.message}`
               : "助手服务暂时不可用，请稍后再试。",
         };
-        const nextMessages = [...(messageCacheRef.current[conversationId] || optimisticMessages), errorMessage];
+        const currentMessages = messageCacheRef.current[conversationId] || optimisticMessages;
+        const hasStreamMessage = currentMessages.some((message) => message.id === streamMessageId);
+        const nextMessages = hasStreamMessage
+          ? currentMessages.map((message) => (message.id === streamMessageId ? errorMessage : message))
+          : [...currentMessages, errorMessage];
         setMessageCache((prev) => ({ ...prev, [conversationId]: nextMessages }));
         if (activeConversationIdRef.current === conversationId) {
           setMessages(nextMessages);
