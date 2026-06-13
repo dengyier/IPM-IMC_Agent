@@ -75,6 +75,57 @@ git reset --hard
 
 ## 3. 当前部署结构确认
 
+### 3.0 线上服务器实测结论（2026-06-12）
+
+已对当前线上服务器 `8.217.223.92` 做只读检查，结论如下：
+
+| 项目 | 线上实际情况 |
+|---|---|
+| 源码拉取目录 | `/data/IPM-IMC_Agent` |
+| 实际部署目录 | `/home/opc/imc-agent` |
+| 源码当前 commit | `30c6932` |
+| 源码分支 | `main` |
+| 部署目录是否完整 git 仓库 | 否，主要通过文件拷贝更新 |
+| API 容器 | `imc-agent-api-1`，运行中且 healthy |
+| 前端容器 | `imc-agent-frontend-1`，运行中 |
+| PostgreSQL 容器 | `imc-agent-postgres-1`，运行中但当前 API 未使用 |
+| Qdrant 容器 | `imc-agent-qdrant-1`，运行中 |
+| API 对外端口 | `18005` |
+| 前端对外端口 | `13005` |
+| 当前数据库 | SQLite |
+| SQLite 文件 | `/opt/imc-migration/imc_ipm.db` |
+| SQLite 文件大小 | 约 13MB |
+| SQLite 完整性 | `PRAGMA integrity_check = ok` |
+| 上传文件卷 | `imc-agent_upload_data` |
+| Qdrant 卷 | `imc-agent_qdrant_data` |
+| PostgreSQL 卷 | `imc-agent_postgres_data` |
+
+线上现有核心表计数：
+
+| 表 | 数量 |
+|---|---:|
+| `auth_users` | 25 |
+| `assistant_conversations` | 22 |
+| `assistant_messages` | 108 |
+| `assistant_files` | 4 |
+| `diagnosis_reports` | 12 |
+| `expansion_sources` | 21 |
+| `expansion_chunks` | 161 |
+| `methodology_nodes` | 1214 |
+| `methodology_edges` | 1947 |
+| `review_tasks` | 532 |
+| `feedbacks` | 2 |
+
+当前线上尚不存在的新版本表：
+
+- `projects`
+- `validation_cards`
+- `tianji_hypotheses`
+- `tianji_evidence_ledger`
+- `tianji_predictions`
+
+这说明线上仍是旧版本数据结构。新代码首次启动时会通过 `init_db()` 自动创建这些新表。上线后需要确认这些表已经创建成功。
+
 ### 3.1 当前 `docker-compose.yml` 的实际情况
 
 当前仓库根目录的 `docker-compose.yml` 同时定义了：
@@ -126,6 +177,54 @@ volumes:
 建议：
 
 > 本次只做代码更新和自动轻量 schema 升级。数据库从 SQLite 切 PostgreSQL 应另开一次专门迁移窗口。
+
+### 3.3 不建议继续使用原始 `cp -r *` 更新方式
+
+当前常用更新方式是：
+
+```bash
+cp -r /data/IPM-IMC_Agent/* /home/opc/imc-agent/
+docker compose down
+sleep 30
+docker compose up -d --build
+```
+
+这个方式有两个优点：
+
+- 不会复制 `.env`，因此通常不会覆盖线上密钥。
+- 简单直接。
+
+但在本次重大版本更新中，它有三个风险：
+
+1. `*` 不包含点文件，行为依赖 shell 规则，不够明确。
+2. `cp -r` 不会删除线上已经废弃的旧文件，可能留下旧页面、旧组件、旧配置。
+3. `docker compose down` 会中断全部服务，虽然不会删除卷，但不是最小影响更新。
+
+本次更推荐使用 `rsync`，并明确排除线上配置和数据：
+
+```bash
+rsync -a --delete \
+  --exclude='.git' \
+  --exclude='.env' \
+  --exclude='backend/data/' \
+  /data/IPM-IMC_Agent/ \
+  /home/opc/imc-agent/
+```
+
+上线前先 dry-run：
+
+```bash
+rsync -a --delete --dry-run \
+  --exclude='.git' \
+  --exclude='.env' \
+  --exclude='backend/data/' \
+  /data/IPM-IMC_Agent/ \
+  /home/opc/imc-agent/
+```
+
+确认 dry-run 输出没有误删关键文件后，再执行正式 rsync。
+
+注意：`.env` 必须保留线上版本，不能从仓库覆盖。
 
 ---
 
@@ -1090,7 +1189,7 @@ docker compose logs -f api
 以下是推荐的最小安全上线命令。执行前请先完成第 5 节备份。
 
 ```bash
-cd /opt/imc-ipm-agent
+cd /data/IPM-IMC_Agent
 
 # 1. 记录旧版本
 git rev-parse HEAD
@@ -1099,17 +1198,36 @@ git rev-parse HEAD
 git fetch origin
 git pull origin main
 
-# 3. 构建应用镜像
+# 3. 先 dry-run 同步到实际部署目录，确认不会误删 .env 和数据
+rsync -a --delete --dry-run \
+  --exclude='.git' \
+  --exclude='.env' \
+  --exclude='backend/data/' \
+  /data/IPM-IMC_Agent/ \
+  /home/opc/imc-agent/
+
+# 4. 正式同步代码到实际部署目录
+rsync -a --delete \
+  --exclude='.git' \
+  --exclude='.env' \
+  --exclude='backend/data/' \
+  /data/IPM-IMC_Agent/ \
+  /home/opc/imc-agent/
+
+# 5. 进入实际部署目录
+cd /home/opc/imc-agent
+
+# 6. 构建应用镜像
 docker compose build api frontend
 
-# 4. 只替换应用服务，不动数据卷
+# 7. 只替换应用服务，不动数据卷
 docker compose up -d --no-deps api
 docker compose logs --tail=120 api
 
 docker compose up -d --no-deps frontend
 docker compose logs --tail=80 frontend
 
-# 5. 状态检查
+# 8. 状态检查
 docker compose ps
 curl -I http://127.0.0.1:18005/docs
 curl -I http://127.0.0.1:13005
@@ -1139,4 +1257,3 @@ curl -I http://127.0.0.1/docs
 当前最推荐的上线策略是：
 
 > **保持线上数据模式不变，先部署本次产品代码，确保 7 天验证闭环可用；数据库迁移另择窗口单独处理。**
-
