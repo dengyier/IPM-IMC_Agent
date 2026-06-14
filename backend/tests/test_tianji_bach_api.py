@@ -104,6 +104,7 @@ def test_assistant_context_includes_validation_card_decision_tree_and_bach():
                 "status": "done",
                 "progress": 100,
                 "evidence_count": 2,
+                "evidence_target": 2,
                 "evidence_items": [{"text": "2位客户愿意预约试点"}],
             },
             {
@@ -120,6 +121,7 @@ def test_assistant_context_includes_validation_card_decision_tree_and_bach():
                 "status": "todo",
                 "progress": 0,
                 "evidence_count": 0,
+                "evidence_target": 2,
                 "evidence_items": [],
             },
         ],
@@ -140,6 +142,10 @@ def test_assistant_context_includes_validation_card_decision_tree_and_bach():
     assert "是否投入30万启动GEO服务产品化" in context
     assert "验证GEO服务产品化痛点" in context
     assert "若 n1 达到成功标准" in context
+    assert "证据目标 0/2，缺口 2 条" in context
+    assert "当前优先追问的缺证据节点" in context
+    assert "节点 2（n2）《测试GEO服务产品化承诺》还缺 2 条证据" in context
+    assert "明确建议回填到对应节点编号" in context
     assert "痛点与付费承诺同时成立" in context
     assert "BACH 冷酷审判" in context
 

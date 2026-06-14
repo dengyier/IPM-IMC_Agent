@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent } from "react";
 
 import { Icon } from "./icon";
-import type { AssistantAttachment, Project, ValidationCard } from "@/lib/api";
+import type { AssistantAttachment, Project, ValidationCard, ValidationEvidenceItem } from "@/lib/api";
 import { ApiError, assistantApi, projectApi, validationCardApi } from "@/lib/api";
 import { suggestionChips } from "@/lib/data";
 import { useAssistant } from "./assistant-context";
@@ -46,6 +46,76 @@ function buildProjectCompanyContext(project: Project | null): string | undefined
     project.status ? `项目状态：${project.status}` : null,
   ].filter(Boolean);
   return `当前经营档案上下文：\n${rows.join("\n")}`;
+}
+
+type EvidenceSourceType = NonNullable<ValidationEvidenceItem["source_type"]>;
+type EvidenceGrade = NonNullable<ValidationEvidenceItem["grade"]>;
+
+const evidenceSourceOptions: { value: EvidenceSourceType; label: string }[] = [
+  { value: "user_interview", label: "经营访谈" },
+  { value: "customer_feedback", label: "客户反馈" },
+  { value: "paid_intent", label: "付费/预约" },
+  { value: "channel_quote", label: "渠道报价" },
+  { value: "cost_estimate", label: "成本估算" },
+  { value: "market_data", label: "市场数据" },
+  { value: "expert_opinion", label: "专家意见" },
+  { value: "document", label: "文档材料" },
+  { value: "other", label: "其他" },
+];
+
+const evidenceGradeOptions: { value: EvidenceGrade; label: string }[] = [
+  { value: "A", label: "A 强证据" },
+  { value: "B", label: "B 较强" },
+  { value: "C", label: "C 一般" },
+  { value: "D", label: "D 弱证据" },
+];
+
+function compactMessageForEvidence(content: string): string {
+  const clean = content.trim().replace(/\s+\n/g, "\n").replace(/\n{3,}/g, "\n\n");
+  return clean.length > 900 ? `${clean.slice(0, 900)}...` : clean;
+}
+
+function defaultActionIndex(card: ValidationCard | null): number {
+  if (!card?.actions?.length) return 0;
+  const missingIndex = card.actions.findIndex((action) => {
+    const target = Number(action.evidence_target || 0);
+    const count = Number(action.evidence_count || action.evidence_items?.length || 0);
+    return action.status !== "done" && target > 0 && count < target;
+  });
+  if (missingIndex >= 0) return missingIndex;
+  const activeIndex = card.actions.findIndex((action) => action.status !== "done");
+  return activeIndex >= 0 ? activeIndex : 0;
+}
+
+function useActiveValidationCard(validationCardId?: string | null) {
+  const [validationCard, setValidationCard] = useState<ValidationCard | null>(null);
+  const [validationCardError, setValidationCardError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!validationCardId) {
+      setValidationCard(null);
+      setValidationCardError(null);
+      return;
+    }
+    setValidationCardError(null);
+    validationCardApi
+      .detail(validationCardId)
+      .then((card) => {
+        if (!cancelled) setValidationCard(card);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setValidationCard(null);
+          setValidationCardError(error instanceof ApiError ? error.message : "验证任务读取失败");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [validationCardId]);
+
+  return { validationCard, setValidationCard, validationCardError };
 }
 
 export function HomeWorkspace({
@@ -162,6 +232,11 @@ function ChatMain({
   const canSend = input.trim().length > 0 && !loading && !attaching;
   const streamingMessageActive = loading && messages[messages.length - 1]?.id.startsWith("a-stream-");
   const hasConversation = messages.some((message) => message.role === "user");
+  const {
+    validationCard: activeValidationCard,
+    setValidationCard: setActiveValidationCard,
+    validationCardError,
+  } = useActiveValidationCard(validationCardId);
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeConversationId),
     [activeConversationId, conversations]
@@ -345,6 +420,11 @@ function ChatMain({
           ) : (
             <div className="mx-auto w-full max-w-[900px] space-y-3 py-4 md:space-y-4 md:py-6">
               {validationCardId && <ValidationContextStrip validationCardId={validationCardId} />}
+              {validationCardError && (
+                <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 text-[13px] font-semibold text-rose-500">
+                  验证任务读取失败：{validationCardError}
+                </div>
+              )}
               {(projectContext || projectLoading || projectError) && (
                 <ProjectContextStrip
                   project={projectContext}
@@ -368,6 +448,8 @@ function ChatMain({
                   onDepositMessage={handleDepositMessage}
                   depositingMessageId={depositingMessageId}
                   projectId={projectContext?.id ?? null}
+                  validationCard={activeValidationCard}
+                  onEvidenceBackfilled={setActiveValidationCard}
                 />
               ))}
               {loading && !streamingMessageActive && (
@@ -596,7 +678,7 @@ function ValidationContextCard({ validationCardId }: { validationCardId: string 
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-black text-[#172452]">已带入当前验证任务</div>
           <p className="mt-1 text-[12px] leading-5 text-slate-500">
-            本轮 AI 经营访谈会读取验证内容、决策树任务、证据状态和 BACH 审判结果。
+            本轮 AI 经营访谈会读取验证内容、决策树任务、证据状态和 BACH 审判结果，并支持把访谈材料回填到节点证据。
           </p>
           <a
             href={`/validation-cards/${validationCardId}`}
@@ -660,7 +742,7 @@ function ValidationContextStrip({ validationCardId }: { validationCardId: string
         <div className="min-w-0">
           <div className="font-black text-[#172452]">已带入验证任务上下文</div>
           <div className="truncate text-[12px] font-semibold text-slate-500">
-            AI 会围绕当前验证内容、任务节点、证据和 BACH 审判继续访谈。
+            AI 会围绕当前验证内容、任务节点、证据和 BACH 审判继续访谈，消息可回填为节点证据。
           </div>
         </div>
       </div>
@@ -822,6 +904,174 @@ function ValidationCardPreview({ card }: { card: ValidationCard }) {
   );
 }
 
+function EvidenceBackfillControl({
+  message,
+  validationCard,
+  onBackfilled,
+  tone = "default",
+  loading = false,
+}: {
+  message: ReturnType<typeof useAssistant>["messages"][number];
+  validationCard?: ValidationCard | null;
+  onBackfilled?: (card: ValidationCard) => void;
+  tone?: "default" | "sent";
+  loading?: boolean;
+}) {
+  const actions = validationCard?.actions ?? [];
+  const [open, setOpen] = useState(false);
+  const [actionIndex, setActionIndex] = useState(0);
+  const [text, setText] = useState(() => compactMessageForEvidence(message.content));
+  const [sourceType, setSourceType] = useState<EvidenceSourceType>("user_interview");
+  const [grade, setGrade] = useState<EvidenceGrade>("C");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setActionIndex(defaultActionIndex(validationCard ?? null));
+  }, [validationCard]);
+
+  useEffect(() => {
+    setText(compactMessageForEvidence(message.content));
+    setSaved(false);
+    setError(null);
+  }, [message.id, message.content]);
+
+  if (!validationCard || actions.length === 0 || message.id === "welcome" || !message.content.trim()) {
+    return null;
+  }
+
+  const activeAction = actions[actionIndex];
+  const activeTarget = Number(activeAction?.evidence_target || 0);
+  const activeCount = Number(activeAction?.evidence_count || activeAction?.evidence_items?.length || 0);
+  const activeMissing = activeTarget > 0 ? Math.max(0, activeTarget - activeCount) : null;
+
+  async function handleSave() {
+    if (!validationCard || saving || !text.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const updated = await validationCardApi.updateAction(validationCard.id, actionIndex, {
+        evidence_item: {
+          text: text.trim(),
+          source_type: sourceType,
+          grade,
+        },
+      });
+      setSaved(true);
+      setOpen(false);
+      onBackfilled?.(updated);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "回填失败，请稍后再试");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-3">
+      <button
+        type="button"
+        disabled={loading || saving}
+        onClick={() => setOpen((value) => !value)}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-bold transition disabled:cursor-not-allowed disabled:opacity-60",
+          tone === "sent"
+            ? "bg-white/15 text-white hover:bg-white/25"
+            : saved
+              ? "bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
+              : "bg-[#f0edff] text-brand hover:bg-[#e8e4ff]"
+        )}
+      >
+        <Icon name={saving ? "refresh" : saved ? "check-circle" : "clipboard-check"} className={cn("h-3.5 w-3.5", saving && "animate-spin")} />
+        {saving ? "回填中" : saved ? "已回填证据" : open ? "收起回填" : "回填证据"}
+      </button>
+      {open && (
+        <div
+          className={cn(
+            "mt-2 rounded-xl border p-3 text-left shadow-[0_10px_22px_rgba(15,23,42,0.06)]",
+            tone === "sent" ? "border-white/20 bg-white text-[#172452]" : "border-line bg-[#fbfaff]"
+          )}
+        >
+          <div className="grid gap-2 md:grid-cols-[1.4fr_0.9fr_0.8fr]">
+            <label className="min-w-0 text-[11.5px] font-bold text-slate-500">
+              验证节点
+              <select
+                value={actionIndex}
+                onChange={(event) => setActionIndex(Number(event.target.value))}
+                className="mt-1 h-9 w-full rounded-lg border border-line bg-white px-2 text-[12px] font-semibold text-[#172452] outline-none focus:border-brand/50"
+              >
+                {actions.map((action, index) => {
+                  const target = Number(action.evidence_target || 0);
+                  const count = Number(action.evidence_count || action.evidence_items?.length || 0);
+                  const missing = target > 0 ? Math.max(0, target - count) : null;
+                  return (
+                    <option key={`${action.node_id}-${index}`} value={index}>
+                      {action.node_id || index + 1} · {action.title}
+                      {missing !== null ? `（缺 ${missing}）` : ""}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            <label className="text-[11.5px] font-bold text-slate-500">
+              来源
+              <select
+                value={sourceType}
+                onChange={(event) => setSourceType(event.target.value as EvidenceSourceType)}
+                className="mt-1 h-9 w-full rounded-lg border border-line bg-white px-2 text-[12px] font-semibold text-[#172452] outline-none focus:border-brand/50"
+              >
+                {evidenceSourceOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-[11.5px] font-bold text-slate-500">
+              等级
+              <select
+                value={grade}
+                onChange={(event) => setGrade(event.target.value as EvidenceGrade)}
+                className="mt-1 h-9 w-full rounded-lg border border-line bg-white px-2 text-[12px] font-semibold text-[#172452] outline-none focus:border-brand/50"
+              >
+                {evidenceGradeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {activeAction && (
+            <p className="mt-2 line-clamp-2 text-[11.5px] leading-5 text-slate-500">
+              {activeMissing !== null
+                ? `当前节点证据 ${activeCount}/${activeTarget}，还缺 ${activeMissing} 条。`
+                : `当前节点已有 ${activeCount} 条证据。`}
+              {activeAction.success_metric ? ` 成功标准：${activeAction.success_metric}` : ""}
+            </p>
+          )}
+          <textarea
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            rows={4}
+            className="mt-2 w-full resize-y rounded-xl border border-line bg-white px-3 py-2 text-[12.5px] leading-5 text-[#172452] outline-none placeholder:text-slate-400 focus:border-brand/50"
+            placeholder="写入客户原话、报价、订金、预约、拒绝理由等可核验证据"
+          />
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={saving || !text.trim()}
+              onClick={handleSave}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-[12px] font-bold text-white transition hover:bg-brand/90 disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              <Icon name={saving ? "refresh" : "check"} className={cn("h-3.5 w-3.5", saving && "animate-spin")} />
+              确认回填
+            </button>
+            {error && <span className="text-[12px] font-semibold text-rose-500">{error}</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TianjiSimulationPanel({
   simulation,
   compact = false,
@@ -973,6 +1223,8 @@ function MessageBubble({
   onDepositMessage,
   depositingMessageId,
   projectId,
+  validationCard,
+  onEvidenceBackfilled,
 }: {
   message: ReturnType<typeof useAssistant>["messages"][number];
   loading: boolean;
@@ -982,16 +1234,18 @@ function MessageBubble({
   onDepositMessage: (messageId: string) => void;
   depositingMessageId: string | null;
   projectId?: string | null;
+  validationCard?: ValidationCard | null;
+  onEvidenceBackfilled?: (card: ValidationCard) => void;
 }) {
   const messageDeposited = Boolean(message.depositedSourceId);
   const canDepositMessage = message.role === "assistant" && message.id !== "welcome";
   const isAssistant = message.role !== "user";
-  const [validationCard, setValidationCard] = useState<ValidationCard | null>(null);
+  const [createdValidationCard, setCreatedValidationCard] = useState<ValidationCard | null>(null);
   const [creatingValidation, setCreatingValidation] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
 
   async function handleCreateValidationCard() {
-    if (creatingValidation || validationCard) return;
+    if (creatingValidation || createdValidationCard) return;
     setCreatingValidation(true);
     setValidationError(null);
     try {
@@ -999,7 +1253,7 @@ function MessageBubble({
         source_message_id: message.id,
         project_id: projectId ?? undefined,
       });
-      setValidationCard(card);
+      setCreatedValidationCard(card);
     } catch (error) {
       setValidationError(error instanceof ApiError ? error.message : "验证卡生成失败");
     } finally {
@@ -1039,6 +1293,13 @@ function MessageBubble({
             ))}
           </div>
         )}
+        <EvidenceBackfillControl
+          message={message}
+          validationCard={validationCard}
+          onBackfilled={onEvidenceBackfilled}
+          tone={message.role === "user" ? "sent" : "default"}
+          loading={loading}
+        />
         {message.nodeRefs && message.nodeRefs.length > 0 && (
           <div className="mt-3 border-t border-line/70 pt-2">
             <div className="text-[11.5px] font-bold text-slate-400">
@@ -1094,7 +1355,7 @@ function MessageBubble({
           <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line/70 pt-2">
             <button
               type="button"
-              disabled={loading || creatingValidation || Boolean(validationCard)}
+              disabled={loading || creatingValidation || Boolean(createdValidationCard)}
               onClick={handleCreateValidationCard}
               className="inline-flex items-center gap-1.5 rounded-lg bg-[#f0edff] px-2.5 py-1.5 text-[12px] font-bold text-brand transition hover:bg-[#e8e4ff] disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -1102,14 +1363,14 @@ function MessageBubble({
                 name={creatingValidation ? "refresh" : "target"}
                 className={cn("h-3.5 w-3.5", creatingValidation && "animate-spin")}
               />
-              {validationCard ? "已生成验证卡" : creatingValidation ? "生成中" : "生成验证卡"}
+              {createdValidationCard ? "已生成验证卡" : creatingValidation ? "生成中" : "生成验证卡"}
             </button>
             {validationError && (
               <span className="text-[12px] font-semibold text-rose-500">{validationError}</span>
             )}
           </div>
         )}
-        {validationCard && <ValidationCardPreview card={validationCard} />}
+        {createdValidationCard && <ValidationCardPreview card={createdValidationCard} />}
         {canDepositMessage && (
           <div className="mt-3 border-t border-line/70 pt-2">
             {messageDeposited ? (
@@ -1264,6 +1525,11 @@ function AssistantFocusMode({
   const { user } = useAuth();
   const canSend = input.trim().length > 0 && !loading;
   const streamingMessageActive = loading && messages[messages.length - 1]?.id.startsWith("a-stream-");
+  const {
+    validationCard: activeValidationCard,
+    setValidationCard: setActiveValidationCard,
+    validationCardError,
+  } = useActiveValidationCard(validationCardId);
   const filteredConversations = useMemo(() => {
     const keyword = searchKeyword.trim().toLowerCase();
     if (!keyword) return conversations;
@@ -1425,6 +1691,11 @@ function AssistantFocusMode({
             {hasConversation && (
               <div className="mx-auto max-w-[900px] space-y-7">
                 {validationCardId && <ValidationContextStrip validationCardId={validationCardId} />}
+                {validationCardError && (
+                  <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 text-[13px] font-semibold text-rose-500">
+                    验证任务读取失败：{validationCardError}
+                  </div>
+                )}
                 {messages.map((message) => (
                   <FocusMessage
                     key={message.id}
@@ -1436,6 +1707,8 @@ function AssistantFocusMode({
                     onDepositMessage={handleDepositMessage}
                     depositingMessageId={depositingMessageId}
                     projectId={projectId}
+                    validationCard={activeValidationCard}
+                    onEvidenceBackfilled={setActiveValidationCard}
                   />
                 ))}
                 {loading && !streamingMessageActive && (
@@ -1505,6 +1778,8 @@ function FocusMessage({
   onDepositMessage,
   depositingMessageId,
   projectId,
+  validationCard,
+  onEvidenceBackfilled,
 }: {
   message: ReturnType<typeof useAssistant>["messages"][number];
   loading: boolean;
@@ -1514,13 +1789,15 @@ function FocusMessage({
   onDepositMessage: (messageId: string) => void;
   depositingMessageId: string | null;
   projectId?: string | null;
+  validationCard?: ValidationCard | null;
+  onEvidenceBackfilled?: (card: ValidationCard) => void;
 }) {
-  const [validationCard, setValidationCard] = useState<ValidationCard | null>(null);
+  const [createdValidationCard, setCreatedValidationCard] = useState<ValidationCard | null>(null);
   const [creatingValidation, setCreatingValidation] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
 
   async function handleCreateValidationCard() {
-    if (creatingValidation || validationCard) return;
+    if (creatingValidation || createdValidationCard) return;
     setCreatingValidation(true);
     setValidationError(null);
     try {
@@ -1528,7 +1805,7 @@ function FocusMessage({
         source_message_id: message.id,
         project_id: projectId ?? undefined,
       });
-      setValidationCard(card);
+      setCreatedValidationCard(card);
     } catch (error) {
       setValidationError(error instanceof ApiError ? error.message : "验证卡生成失败");
     } finally {
@@ -1553,6 +1830,12 @@ function FocusMessage({
               ))}
             </div>
           )}
+          <EvidenceBackfillControl
+            message={message}
+            validationCard={validationCard}
+            onBackfilled={onEvidenceBackfilled}
+            loading={loading}
+          />
         </div>
       </div>
     );
@@ -1567,6 +1850,12 @@ function FocusMessage({
         <div className="whitespace-pre-line text-[14px] leading-7 text-[#172452]">
           {message.content}
         </div>
+        <EvidenceBackfillControl
+          message={message}
+          validationCard={validationCard}
+          onBackfilled={onEvidenceBackfilled}
+          loading={loading}
+        />
         <TianjiSimulationPanel simulation={message.tianjiSimulation} />
         {message.nodeRefs && message.nodeRefs.length > 0 && (
           <div className="mt-4 border-t border-line pt-3">
@@ -1616,7 +1905,7 @@ function FocusMessage({
           <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3">
             <button
               type="button"
-              disabled={loading || creatingValidation || Boolean(validationCard)}
+              disabled={loading || creatingValidation || Boolean(createdValidationCard)}
               onClick={handleCreateValidationCard}
               className="inline-flex items-center gap-1.5 rounded-xl bg-[#f0edff] px-3 py-2 text-[13px] font-bold text-brand transition hover:bg-[#e8e4ff] disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -1624,14 +1913,14 @@ function FocusMessage({
                 name={creatingValidation ? "refresh" : "target"}
                 className={cn("h-3.5 w-3.5", creatingValidation && "animate-spin")}
               />
-              {validationCard ? "已生成验证卡" : creatingValidation ? "生成中" : "生成验证卡"}
+              {createdValidationCard ? "已生成验证卡" : creatingValidation ? "生成中" : "生成验证卡"}
             </button>
             {validationError && (
               <span className="text-[12px] font-semibold text-rose-500">{validationError}</span>
             )}
           </div>
         )}
-        {validationCard && <ValidationCardPreview card={validationCard} />}
+        {createdValidationCard && <ValidationCardPreview card={createdValidationCard} />}
         {message.id !== "welcome" && (
           <div className="mt-4 border-t border-line pt-3">
             {message.depositedSourceId ? (

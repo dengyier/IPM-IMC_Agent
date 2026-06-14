@@ -247,6 +247,13 @@ def _project_context_for_assistant(
     return "\n".join(parts)
 
 
+def _nonnegative_int(value: object, default: int = 0) -> int:
+    try:
+        return max(0, int(value))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
 def _validation_card_context_for_assistant(
     db: Session,
     validation_card_id: str | None,
@@ -291,6 +298,7 @@ def _validation_card_context_for_assistant(
     actions = card.actions or []
     if actions:
         lines.extend(["", "决策树/验证任务节点："])
+        missing_targets: list[tuple[int, int, str, str, int, str]] = []
         for index, action in enumerate(actions[:12], start=1):
             if not isinstance(action, dict):
                 continue
@@ -306,7 +314,11 @@ def _validation_card_context_for_assistant(
             baseline = str(action.get("baseline") or "").strip()
             status = str(action.get("status") or "todo").strip()
             progress = action.get("progress", 0)
-            evidence_count = action.get("evidence_count", 0)
+            evidence_items = action.get("evidence_items") or []
+            item_count = len(evidence_items) if isinstance(evidence_items, list) else 0
+            evidence_count = _nonnegative_int(action.get("evidence_count"), item_count)
+            evidence_target = _nonnegative_int(action.get("evidence_target"), 0)
+            missing_count = max(0, evidence_target - evidence_count) if evidence_target else 0
             lines.append(
                 f"{index}. [{node_id} | {node_type}"
                 f"{f' | parent={parent_id}' if parent_id else ''}] {title}"
@@ -321,8 +333,16 @@ def _validation_card_context_for_assistant(
                 lines.append(f"   对象/基线：{target or '未填写'} / {baseline or '未填写'}")
             if metric:
                 lines.append(f"   成功标准：{metric}")
-            lines.append(f"   执行状态：{status}，进度 {progress}%，证据 {evidence_count} 条")
-            evidence_items = action.get("evidence_items") or []
+            if evidence_target:
+                lines.append(
+                    f"   执行状态：{status}，进度 {progress}%，证据目标 {evidence_count}/{evidence_target}，缺口 {missing_count} 条"
+                )
+            else:
+                lines.append(f"   执行状态：{status}，进度 {progress}%，证据 {evidence_count} 条")
+            if missing_count > 0 and status != "done":
+                priority = 0 if status == "running" else 1
+                prompt_hint = objective or metric or branch or "请围绕该节点补充客户原话、行为承诺、报价或可核验事实。"
+                missing_targets.append((priority, index, node_id, title, missing_count, prompt_hint))
             if isinstance(evidence_items, list) and evidence_items:
                 evidence_texts = []
                 for item in evidence_items[-2:]:
@@ -334,6 +354,11 @@ def _validation_card_context_for_assistant(
                         evidence_texts.append(text)
                 if evidence_texts:
                     lines.append(f"   最近证据：{'；'.join(evidence_texts)}")
+        if missing_targets:
+            lines.extend(["", "当前优先追问的缺证据节点："])
+            for _, index, node_id, title, missing_count, prompt_hint in sorted(missing_targets)[:5]:
+                lines.append(f"- 节点 {index}（{node_id}）《{title}》还缺 {missing_count} 条证据。")
+                lines.append(f"  追问方向：{prompt_hint}")
 
     adjudication = tianji_bach_service.adjudicate(db, card.id)
     if adjudication:
@@ -375,7 +400,7 @@ def _validation_card_context_for_assistant(
     lines.extend(
         [
             "",
-            "访谈要求：围绕上述验证卡继续追问、补证据、更新判断；不要重新泛泛生成一张验证卡。",
+            "访谈要求：围绕上述验证卡继续追问、补证据、更新判断；优先追问缺证据节点。若用户给出客户原话、报价、订金、预约、拒绝理由或可核验事实，请明确建议回填到对应节点编号；不要重新泛泛生成一张验证卡。",
         ]
     )
     return "\n".join(lines)[:12000], card.project_id
