@@ -468,7 +468,7 @@ function ChatMain({
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,.docx,.txt,.md,.pptx,.xlsx"
+            accept=".pdf,.docx,.txt,.md,.pptx,.xlsx,.png,.jpg,.jpeg,.webp"
             className="hidden"
             onChange={(event) => {
               const f = event.target.files?.[0];
@@ -490,7 +490,9 @@ function ChatMain({
                     <Icon name="file-text" className="h-3.5 w-3.5 text-brand" />
                     <span className="max-w-[calc(100vw-170px)] truncate md:max-w-[260px]">{attachment.name}</span>
                     <span className="text-[11px] text-emerald-600">
-                      已解析全文 · {attachment.chunkCount} 片段
+                      {attachment.status === "image_ready"
+                        ? "图片已上传 · 待补充关键信息"
+                        : `已解析全文 · ${attachment.chunkCount} 片段`}
                     </span>
                     <button
                       type="button"
@@ -519,7 +521,7 @@ function ChatMain({
                 onClick={() => fileInputRef.current?.click()}
                 disabled={attaching}
                 className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-50 hover:text-brand disabled:opacity-50"
-                title="上传文件（PDF / DOCX / PPTX / XLSX / TXT / MD），解析后随诉求一起发送"
+                title="上传材料（PDF / DOCX / PPTX / XLSX / TXT / MD / 图片），解析后随诉求一起发送；图片需补充关键信息"
               >
                 <Icon name="plus" className="h-5 w-5" />
               </button>

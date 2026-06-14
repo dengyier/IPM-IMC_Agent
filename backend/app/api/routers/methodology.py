@@ -56,7 +56,7 @@ router = APIRouter(
     dependencies=[Depends(require_super_admin)],
 )
 
-_ALLOWED_SUFFIXES = {".pdf", ".docx", ".txt", ".md", ".pptx"}
+_ALLOWED_SUFFIXES = {".pdf", ".docx", ".txt", ".md", ".pptx", ".xlsx"}
 
 
 def _build_graph(

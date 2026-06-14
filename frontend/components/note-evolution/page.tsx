@@ -262,7 +262,7 @@ function SubmitNote({
               <input
                 ref={inputRef}
                 type="file"
-                accept=".pdf,.docx,.txt,.md,.pptx"
+                accept=".pdf,.docx,.xlsx,.txt,.md,.pptx,.png,.jpg,.jpeg,.webp"
                 className="hidden"
                 onChange={(e) => onFile(e.target.files?.[0] ?? null)}
               />
@@ -275,7 +275,7 @@ function SubmitNote({
                   {file ? file.name : "点击选择文件"}
                 </div>
                 <div className="mt-3 text-[12px] font-semibold text-slate-400">
-                  支持 PDF、DOCX、PPTX、TXT、MD
+                  支持 PDF、DOCX、XLSX、PPTX、TXT、MD 和图片
                 </div>
               </button>
             </>

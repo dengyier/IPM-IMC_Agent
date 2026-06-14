@@ -303,12 +303,21 @@ function UploadCard({
     }
   }, [canManageCore, layer]);
 
+  const acceptedTypes =
+    layer === "core"
+      ? ".pdf,.docx,.xlsx,.txt,.md,.pptx"
+      : ".pdf,.docx,.xlsx,.txt,.md,.pptx,.png,.jpg,.jpeg,.webp";
+  const supportText =
+    layer === "core"
+      ? "支持 PDF、DOCX、XLSX、PPTX、TXT、MD，将上传到核心方法论池"
+      : "支持 PDF、DOCX、XLSX、PPTX、TXT、MD 和图片；图片会先作为待识别材料进入外部资料池";
+
   return (
     <Card className="min-h-[226px] p-4">
       <input
         ref={inputRef}
         type="file"
-        accept=".pdf,.docx,.txt,.md,.pptx"
+        accept={acceptedTypes}
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -335,7 +344,7 @@ function UploadCard({
             <Icon name="upload-cloud" className="h-7 w-7" />
           </div>
           <p className="mx-auto mt-3 max-w-[330px] text-[12px] leading-6 text-slate-400">
-            支持 PDF、DOCX、PPTX、TXT、MD，将上传到「{layer === "core" ? "核心方法论" : "外部资料"}」池
+            {supportText}
           </p>
           <button
             onClick={() => inputRef.current?.click()}

@@ -56,7 +56,24 @@ from app.services.vector_store import VectorStore
 
 router = APIRouter(prefix="/api/expansion", tags=["expansion"])
 
-_ALLOWED_SUFFIXES = {".pdf", ".docx", ".txt", ".md", ".pptx"}
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
+_ALLOWED_SUFFIXES = {".pdf", ".docx", ".txt", ".md", ".pptx", ".xlsx", *_IMAGE_SUFFIXES}
+
+
+def _image_placeholder_text(filename: str, content_type: str | None) -> str:
+    return "\n".join(
+        [
+            f"# 图片材料：{filename}",
+            "",
+            "## 解析状态",
+            "该来源是用户上传的图片材料，系统已保存原图；当前资料中心尚未启用 OCR/视觉识别。",
+            "吸收与审核时请先由人工补充图片中的关键文字、表格、截图信息或业务证据，再决定是否进入正式知识资产。",
+            "",
+            "## 元信息",
+            f"- 原始文件名：{filename}",
+            f"- 文件类型：{content_type or 'image'}",
+        ]
+    )
 
 
 def _graph(
@@ -101,7 +118,24 @@ async def upload_expansion(
     if not content:
         raise HTTPException(status_code=400, detail="文件为空")
 
-    saved = storage.save(filename, content)
+    meta = {"original_filename": filename, "size": len(content)}
+    if suffix in _IMAGE_SUFFIXES:
+        original_saved = storage.save(filename, content)
+        saved = storage.save(
+            f"{filename}.txt",
+            _image_placeholder_text(filename, file.content_type).encode("utf-8"),
+        )
+        meta.update(
+            {
+                "content_kind": "image",
+                "original_image_path": str(original_saved),
+                "content_type": file.content_type,
+                "ocr_status": "not_enabled",
+            }
+        )
+    else:
+        saved = storage.save(filename, content)
+
     source = ExpansionSource(
         tenant_id=user.tenant_id,
         title=title or filename,
@@ -111,7 +145,7 @@ async def upload_expansion(
         source_layer="expansion",
         visibility=visibility,
         status="uploaded",
-        meta={"original_filename": filename, "size": len(content)},
+        meta=meta,
     )
     db.add(source)
     db.commit()
