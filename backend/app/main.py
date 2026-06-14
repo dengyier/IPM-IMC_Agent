@@ -10,6 +10,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from pathlib import Path as _Path
+
+from fastapi.staticfiles import StaticFiles
+
 from app.api.errors import install_error_handlers
 from app.api.routers import (
     assistant,
@@ -50,6 +54,12 @@ def create_app() -> FastAPI:
     )
 
     install_error_handlers(app)
+
+    # 静态文件：上传目录（证据附件等）
+    settings = get_settings()
+    uploads_dir = _Path(settings.storage_dir)
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 
     app.include_router(system.router)
     app.include_router(auth.router)

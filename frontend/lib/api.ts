@@ -700,6 +700,20 @@ export type ValidationStatus = "draft" | "running" | "completed" | "archived";
 
 export interface ValidationEvidenceItem {
   text: string;
+  grade?: 'A' | 'B' | 'C' | 'D' | null;
+  source_type?:
+    | 'user_interview'
+    | 'customer_feedback'
+    | 'paid_intent'
+    | 'channel_quote'
+    | 'cost_estimate'
+    | 'market_data'
+    | 'expert_opinion'
+    | 'document'
+    | 'other'
+    | null;
+  attachment_url?: string | null;
+  attachment_name?: string | null;
   created_at?: string | null;
 }
 
@@ -801,8 +815,16 @@ export const validationCardApi = {
     actionIndex: number,
     payload: Partial<
       Pick<ValidationAction, "status" | "progress" | "evidence_count" | "owner" | "due_at" | "completed_at">
-    > & { evidence_note?: string }
+    > & { evidence_note?: string; evidence_item?: ValidationEvidenceItem }
   ) => api.patch<ValidationCard>(`/api/validation-cards/${id}/actions/${actionIndex}`, payload),
+  uploadAttachment: (id: string, file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return uploadRequest<{ url: string; name: string; size: number }>(
+      `/api/validation-cards/${id}/attachments`,
+      form
+    );
+  },
   submitReview: (
     id: string,
     payload: {

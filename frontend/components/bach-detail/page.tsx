@@ -18,6 +18,18 @@ const verdictMap: Record<string, { label: string; tone: string; bg: string }> = 
   pause: { label: "暂不建议继续", tone: "text-rose-600", bg: "bg-rose-50 border-rose-100" },
 };
 
+const evidenceSourceLabels: Record<string, string> = {
+  user_interview: "用户访谈",
+  customer_feedback: "客户反馈",
+  paid_intent: "付费意向",
+  channel_quote: "渠道报价",
+  cost_estimate: "成本估算",
+  market_data: "市场数据",
+  expert_opinion: "专家意见",
+  document: "文档资料",
+  other: "其他",
+};
+
 export function BachDetailPage({ cardId }: { cardId: string }) {
   const [data, setData] = useState<TianjiBachCase | null>(null);
   const [loading, setLoading] = useState(true);
@@ -226,37 +238,66 @@ function EvidenceLedger({ data }: { data: TianjiBachCase }) {
         <div className="rounded-2xl bg-slate-50 px-4 py-6 text-center text-[13px] font-bold text-slate-400">暂无证据入账</div>
       ) : (
         <div className="divide-y divide-line">
-          {data.evidence.slice(0, 12).map((item) => (
-            <div key={item.id} className="grid gap-3 py-3 md:grid-cols-[80px_1fr_140px]">
-              <div>
-                <span className={cn("rounded-lg px-2 py-1 text-[12px] font-black", gradeTone(item.grade))}>{item.grade} 级</span>
-              </div>
-              <div className="min-w-0">
-                <div className="line-clamp-2 text-[13px] font-bold leading-5 text-[#172452]">{item.content}</div>
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-slate-400">
-                  <span className="truncate">{item.source_type} · {item.source_ref}</span>
-                  {item.reviewer_spread > 0.6 && (
-                    <span className="rounded bg-rose-50 px-1.5 py-0.5 font-black text-rose-600">
-                      评审分歧 ±{item.reviewer_spread}，已降权
-                    </span>
-                  )}
-                  {Array.isArray(item.review_detail?.reviewers) && (item.review_detail.reviewers as unknown[]).length > 1 && (
-                    <span className="rounded bg-[#f0edff] px-1.5 py-0.5 font-black text-brand">
-                      {(item.review_detail.reviewers as unknown[]).length} 模型评审
-                    </span>
+          {data.evidence.slice(0, 12).map((item) => {
+            const meta = validationEvidenceMeta(item.review_detail);
+            return (
+              <div key={item.id} className="grid gap-3 py-3 md:grid-cols-[80px_1fr_140px]">
+                <div>
+                  <span className={cn("rounded-lg px-2 py-1 text-[12px] font-black", gradeTone(item.grade))}>{item.grade} 级</span>
+                  {meta.user_grade && meta.user_grade !== item.grade && (
+                    <div className="mt-2 text-[10px] font-bold text-slate-400">用户标注 {meta.user_grade}</div>
                   )}
                 </div>
+                <div className="min-w-0">
+                  <div className="line-clamp-2 text-[13px] font-bold leading-5 text-[#172452]">{item.content}</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-slate-400">
+                    <span className="truncate">{item.source_type} · {item.source_ref}</span>
+                    {meta.user_source_type && (
+                      <span className="rounded bg-slate-100 px-1.5 py-0.5 font-black text-slate-500">
+                        {evidenceSourceLabels[meta.user_source_type] || meta.user_source_type}
+                      </span>
+                    )}
+                    {meta.attachment_name && (
+                      <a
+                        href={meta.attachment_url || "#"}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded bg-blue-50 px-1.5 py-0.5 font-black text-blue-600 underline"
+                      >
+                        附件：{meta.attachment_name}
+                      </a>
+                    )}
+                    {item.reviewer_spread > 0.6 && (
+                      <span className="rounded bg-rose-50 px-1.5 py-0.5 font-black text-rose-600">
+                        评审分歧 ±{item.reviewer_spread}，已降权
+                      </span>
+                    )}
+                    {Array.isArray(item.review_detail?.reviewers) && (item.review_detail.reviewers as unknown[]).length > 1 && (
+                      <span className="rounded bg-[#f0edff] px-1.5 py-0.5 font-black text-brand">
+                        {(item.review_detail.reviewers as unknown[]).length} 模型评审
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="text-right text-[12px] font-bold text-slate-500">
+                  <div>LR {item.log_lr_effective}</div>
+                  <div className="mt-1 text-slate-400">raw {item.log_lr_raw}</div>
+                </div>
               </div>
-              <div className="text-right text-[12px] font-bold text-slate-500">
-                <div>LR {item.log_lr_effective}</div>
-                <div className="mt-1 text-slate-400">raw {item.log_lr_raw}</div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>
   );
+}
+
+function validationEvidenceMeta(detail: Record<string, unknown>) {
+  const meta = detail?.validation_evidence;
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) {
+    return {} as Record<string, string>;
+  }
+  return meta as Record<string, string>;
 }
 
 function SandboxPanel({

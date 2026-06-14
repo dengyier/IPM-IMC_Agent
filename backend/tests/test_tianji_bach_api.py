@@ -6,9 +6,9 @@ from sqlalchemy.orm import sessionmaker
 from app.api.routers.assistant import _validation_card_context_for_assistant
 from app.api.routers.tianji_bach import get_tianji_bach_case
 from app.db.base import Base
-from app.db.models import Project, TianjiPrediction, ValidationCard
+from app.db.models import Project, TianjiEvidenceRecord, TianjiPrediction, ValidationCard
 from app.db.models.auth import AuthUser
-from app.schemas.validation import ValidationActionPatch, ValidationCardCreate
+from app.schemas.validation import ValidationActionPatch, ValidationCardCreate, ValidationEvidenceItem
 from app.services import tianji_bach_service as bach
 from app.services import workbench_service
 from app.services import validation_card_service
@@ -259,6 +259,53 @@ def test_validation_action_evidence_updates_bach_prediction_trace():
 
     after = db.query(TianjiPrediction).filter(TianjiPrediction.case_id == card.id).count()
     assert after == before + 1
+
+
+def test_validation_action_evidence_item_metadata_flows_to_bach_ledger():
+    db = _db()
+    user = _user(db)
+    card = validation_card_service.create_card(
+        db,
+        user,
+        ValidationCardCreate(
+            title="是否投入30万启动GEO服务产品化",
+            project_description="计划投入30万，面向中小企业主提供GEO服务产品化。",
+            target_customer="中小企业主",
+        ),
+        llm=None,
+    )
+
+    validation_card_service.update_action(
+        db,
+        card,
+        0,
+        ValidationActionPatch(
+            evidence_item=ValidationEvidenceItem(
+                text="客户A愿意预约试点，并要求下周看报价。",
+                grade="B",
+                source_type="user_interview",
+                attachment_url="/uploads/evidence_attachments/card/a.png",
+                attachment_name="访谈截图.png",
+            )
+        ),
+        llm=None,
+    )
+
+    db.refresh(card)
+    stored_item = card.actions[0]["evidence_items"][0]
+    assert stored_item["source_type"] == "user_interview"
+    assert stored_item["grade"] == "B"
+    record = (
+        db.query(TianjiEvidenceRecord)
+        .filter(TianjiEvidenceRecord.case_id == card.id)
+        .order_by(TianjiEvidenceRecord.created_at.desc())
+        .first()
+    )
+    assert record is not None
+    assert record.content == "客户A愿意预约试点，并要求下周看报价。"
+    assert record.review_detail["validation_evidence"]["user_source_type"] == "user_interview"
+    assert record.review_detail["validation_evidence"]["user_grade"] == "B"
+    assert record.review_detail["validation_evidence"]["attachment_name"] == "访谈截图.png"
 
 
 def test_validation_card_fallback_generates_decision_tree_from_decision_problem():

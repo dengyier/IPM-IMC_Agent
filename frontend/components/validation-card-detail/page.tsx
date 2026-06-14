@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { Icon } from "@/components/icon";
-import { ApiError, validationCardApi, type ValidationAction, type ValidationCard } from "@/lib/api";
+import { ApiError, validationCardApi, type ValidationAction, type ValidationCard, type ValidationEvidenceItem } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type SaveState = {
@@ -12,6 +12,10 @@ type SaveState = {
 };
 
 type ReviewDecision = "continue" | "adjust" | "pause" | "";
+
+type ActionFilter = "all" | "todo" | "running" | "done" | "blocked";
+
+type DayGrouping = "flat" | "by-day";
 
 const dayLabels = [
   "提交任务",
@@ -24,11 +28,40 @@ const dayLabels = [
   "复盘决策",
 ];
 
+const gradeLabels: Record<string, string> = { A: "A 级 — 强证据", B: "B 级 — 中证据", C: "C 级 — 弱证据", D: "D 级 — 参考" };
+const gradeShortLabels: Record<string, string> = { A: "A", B: "B", C: "C", D: "D" };
+const gradeTones: Record<string, string> = {
+  A: "bg-emerald-50 text-emerald-600 border-emerald-200",
+  B: "bg-blue-50 text-blue-600 border-blue-200",
+  C: "bg-orange-50 text-orange-600 border-orange-200",
+  D: "bg-slate-50 text-slate-500 border-slate-200",
+};
+
+const sourceTypeLabels: Record<string, string> = {
+  user_interview: "用户访谈",
+  customer_feedback: "客户反馈",
+  paid_intent: "付费意向",
+  channel_quote: "渠道报价",
+  cost_estimate: "成本估算",
+  market_data: "市场数据",
+  expert_opinion: "专家意见",
+  document: "文档资料",
+  other: "其他",
+};
+
 export function ValidationCardDetailPage({ cardId }: { cardId: string }) {
   const [card, setCard] = useState<ValidationCard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<SaveState | null>(null);
+
+  // P1-1: node filter state
+  const [filterStatus, setFilterStatus] = useState<ActionFilter>("all");
+  // P1-2: day grouping toggle
+  const [dayGrouping, setDayGrouping] = useState<DayGrouping>("flat");
+  // P1-3: detail drawer
+  const [drawerAction, setDrawerAction] = useState<ValidationAction | null>(null);
+  const [drawerIndex, setDrawerIndex] = useState<number>(-1);
 
   async function load(options?: { quiet?: boolean }) {
     if (!options?.quiet) setLoading(true);
@@ -52,15 +85,64 @@ export function ValidationCardDetailPage({ cardId }: { cardId: string }) {
   const currentDay = useMemo(() => inferCurrentDay(card, actions), [card, actions]);
   const completionRate = actions.length ? Math.round((completedCount / actions.length) * 100) : 0;
 
-  async function addEvidence(actionIndex: number, text: string) {
+  // P1-1: filtered actions
+  const filteredActions = useMemo(
+    () => (filterStatus === "all" ? actions : actions.filter((a) => a.status === filterStatus)),
+    [actions, filterStatus]
+  );
+
+  // P1-2: grouped actions by day
+  const groupedActions = useMemo(() => {
+    if (dayGrouping !== "by-day") return null;
+    const groups = new Map<number, ValidationAction[]>();
+    for (const action of filteredActions) {
+      const day = actionDay(action);
+      const existing = groups.get(day) || [];
+      existing.push(action);
+      groups.set(day, existing);
+    }
+    const sorted = Array.from(groups.entries()).sort(([a], [b]) => a - b);
+    return sorted;
+  }, [filteredActions, dayGrouping]);
+
+  // P1-6: evidence attachment upload
+  const [uploadingFile, setUploadingFile] = useState<number | null>(null);
+
+  async function addEvidence(
+    actionIndex: number,
+    text: string,
+    grade?: string | null,
+    sourceType?: string | null,
+    attachmentUrl?: string | null,
+    attachmentName?: string | null
+  ) {
     if (!card || !text.trim()) return;
     setSaving({ key: `evidence-${actionIndex}`, message: null });
     try {
-      const updated = await validationCardApi.updateAction(card.id, actionIndex, { evidence_note: text.trim() });
+      const evidenceItem: ValidationEvidenceItem = { text: text.trim() };
+      if (grade) evidenceItem.grade = grade as ValidationEvidenceItem["grade"];
+      if (sourceType) evidenceItem.source_type = sourceType as ValidationEvidenceItem["source_type"];
+      if (attachmentUrl) evidenceItem.attachment_url = attachmentUrl;
+      if (attachmentName) evidenceItem.attachment_name = attachmentName;
+      const updated = await validationCardApi.updateAction(card.id, actionIndex, { evidence_item: evidenceItem });
       setCard(updated);
       setSaving({ key: `evidence-${actionIndex}`, message: "证据已入账" });
     } catch (e) {
       setSaving({ key: `evidence-${actionIndex}`, message: e instanceof ApiError ? e.message : "证据入账失败" });
+    }
+  }
+
+  async function handleFileUpload(actionIndex: number, file: File): Promise<{ url: string; name: string } | null> {
+    if (!card) return null;
+    setUploadingFile(actionIndex);
+    try {
+      const result = await validationCardApi.uploadAttachment(card.id, file);
+      if (!result) return null;
+      return { url: result.url, name: result.name };
+    } catch {
+      return null;
+    } finally {
+      setUploadingFile(null);
     }
   }
 
@@ -111,7 +193,16 @@ export function ValidationCardDetailPage({ cardId }: { cardId: string }) {
           </p>
         </div>
         {card && (
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {/* P1-7: Export to Markdown */}
+            <button
+              type="button"
+              onClick={() => exportMarkdown(card)}
+              className="flex h-10 items-center gap-1.5 rounded-xl border border-line bg-white px-3 text-[12px] font-black text-slate-600 shadow-sm hover:border-brand/30 hover:text-brand"
+            >
+              <Icon name="download" className="h-3.5 w-3.5" />
+              导出 MD
+            </button>
             <a
               href={chatHref(card)}
               className="flex h-10 items-center gap-1.5 rounded-xl border border-line bg-white px-4 text-[12px] font-black text-[#172452] shadow-sm hover:border-brand/30 hover:text-brand"
@@ -155,9 +246,22 @@ export function ValidationCardDetailPage({ cardId }: { cardId: string }) {
             <DecisionTree
               card={card}
               saving={saving}
+              filterStatus={filterStatus}
+              onFilterChange={setFilterStatus}
+              dayGrouping={dayGrouping}
+              onDayGroupingChange={setDayGrouping}
+              filteredActions={filteredActions}
+              groupedActions={groupedActions}
               onAddEvidence={addEvidence}
               onMarkDone={markDone}
+              uploadingFile={uploadingFile}
+              onFileUpload={handleFileUpload}
+              onOpenDrawer={(action, index) => { setDrawerAction(action); setDrawerIndex(index); }}
             />
+            {/* P1-8: Read-only case summary after review */}
+            {card.result && (
+              <ReadOnlyCaseSummary card={card} />
+            )}
             <EvidenceSection actions={actions} />
           </section>
 
@@ -188,6 +292,21 @@ export function ValidationCardDetailPage({ cardId }: { cardId: string }) {
           </aside>
         </div>
       ) : null}
+
+      {/* P1-3: Node detail drawer */}
+      {drawerAction && (
+        <NodeDetailDrawer
+          action={drawerAction}
+          index={drawerIndex}
+          cardId={card?.id ?? ""}
+          saving={saving}
+          onClose={() => { setDrawerAction(null); setDrawerIndex(-1); }}
+          onAddEvidence={addEvidence}
+          onMarkDone={markDone}
+          uploadingFile={uploadingFile}
+          onFileUpload={handleFileUpload}
+        />
+      )}
     </main>
   );
 }
@@ -266,39 +385,167 @@ function DayTimeline({ currentDay, actions }: { currentDay: number; actions: Val
 function DecisionTree({
   card,
   saving,
+  filterStatus,
+  onFilterChange,
+  dayGrouping,
+  onDayGroupingChange,
+  filteredActions,
+  groupedActions,
   onAddEvidence,
   onMarkDone,
+  uploadingFile,
+  onFileUpload,
+  onOpenDrawer,
 }: {
   card: ValidationCard;
   saving: SaveState | null;
-  onAddEvidence: (index: number, text: string) => Promise<void>;
+  filterStatus: ActionFilter;
+  onFilterChange: (f: ActionFilter) => void;
+  dayGrouping: DayGrouping;
+  onDayGroupingChange: (g: DayGrouping) => void;
+  filteredActions: ValidationAction[];
+  groupedActions: [number, ValidationAction[]][] | null;
+  onAddEvidence: (actionIndex: number, text: string, grade?: string | null, sourceType?: string | null, attachmentUrl?: string | null, attachmentName?: string | null) => Promise<void>;
   onMarkDone: (index: number) => Promise<void>;
+  uploadingFile: number | null;
+  onFileUpload: (actionIndex: number, file: File) => Promise<{ url: string; name: string } | null>;
+  onOpenDrawer: (action: ValidationAction, index: number) => void;
 }) {
   const actions = card.actions ?? [];
+
+  // Build a map from node_id to index in the original actions array
+  const nodeIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    actions.forEach((a, i) => { if (a.node_id) map.set(a.node_id, i); });
+    return map;
+  }, [actions]);
+
+  // Count per filter status
+  const counts = useMemo(() => ({
+    all: actions.length,
+    todo: actions.filter((a) => a.status === "todo").length,
+    running: actions.filter((a) => a.status === "running").length,
+    done: actions.filter((a) => a.status === "done").length,
+    blocked: actions.filter((a) => a.status === "blocked").length,
+  }), [actions]);
+
+  const filterButtons: { key: ActionFilter; label: string }[] = [
+    { key: "all", label: "全部" },
+    { key: "todo", label: "待验证" },
+    { key: "running", label: "进行中" },
+    { key: "done", label: "已完成" },
+    { key: "blocked", label: "已阻塞" },
+  ];
+
   return (
     <section className="dashboard-card rounded-2xl px-5 py-5">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-[17px] font-black text-ink">完整决策树节点</h2>
-          <p className="mt-1 text-[12px] font-semibold text-slate-500">节点数量不固定，按假设分支深度展开；每个节点都要补齐自己的证据。</p>
+      <div className="mb-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-[17px] font-black text-ink">完整决策树节点</h2>
+            <p className="mt-1 text-[12px] font-semibold text-slate-500">节点数量不固定，按假设分支深度展开；每个节点都要补齐自己的证据。</p>
+          </div>
+          {/* P1-2: Day grouping toggle */}
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-semibold text-slate-400">展示:</span>
+            <button
+              type="button"
+              onClick={() => onDayGroupingChange("flat")}
+              className={cn(
+                "rounded-lg px-3 py-1.5 text-[11px] font-black",
+                dayGrouping === "flat" ? "bg-brand text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+              )}
+            >
+              平铺
+            </button>
+            <button
+              type="button"
+              onClick={() => onDayGroupingChange("by-day")}
+              className={cn(
+                "rounded-lg px-3 py-1.5 text-[11px] font-black",
+                dayGrouping === "by-day" ? "bg-brand text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+              )}
+            >
+              按天分组
+            </button>
+          </div>
+          <span className="rounded-xl bg-[#f7f8ff] px-3 py-2 text-[12px] font-black text-brand">{actions.length} 个节点</span>
         </div>
-        <span className="rounded-xl bg-[#f7f8ff] px-3 py-2 text-[12px] font-black text-brand">{actions.length} 个节点</span>
-      </div>
-      {actions.length === 0 ? (
-        <div className="rounded-2xl bg-slate-50 px-4 py-10 text-center text-[13px] font-bold text-slate-400">暂无验证节点</div>
-      ) : (
-        <div className="space-y-3">
-          {actions.map((action, index) => (
-            <TreeNode
-              key={`${action.node_id || index}-${action.title}`}
-              index={index}
-              action={action}
-              depth={treeDepth(action, actions)}
-              saving={saving}
-              onAddEvidence={onAddEvidence}
-              onMarkDone={onMarkDone}
-            />
+
+        {/* P1-1: filter bar */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {filterButtons.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onFilterChange(key)}
+              className={cn(
+                "rounded-lg px-3 py-1.5 text-[11px] font-black transition-colors",
+                filterStatus === key
+                  ? "bg-[#f0edff] text-brand"
+                  : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+              )}
+            >
+              {label} ({counts[key]})
+            </button>
           ))}
+        </div>
+      </div>
+
+      {filteredActions.length === 0 ? (
+        <div className="rounded-2xl bg-slate-50 px-4 py-10 text-center text-[13px] font-bold text-slate-400">该筛选条件下暂无节点</div>
+      ) : groupedActions ? (
+        /* P1-2: Day grouped view */
+        <div className="space-y-6">
+          {groupedActions.map(([day, dayActions]) => (
+            <div key={`day-${day}`}>
+              <div className="mb-3 flex items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand text-[11px] font-black text-white">D{day}</span>
+                <span className="text-[13px] font-black text-[#172452]">{dayLabels[day] || `Day ${day}`}</span>
+                <span className="text-[11px] font-bold text-slate-400">{dayActions.length} 个节点</span>
+              </div>
+              <div className="space-y-3">
+                {dayActions.map((action) => {
+                  const realIndex = nodeIndexMap.get(action.node_id) ?? actions.indexOf(action);
+                  return (
+                    <TreeNode
+                      key={`${action.node_id || realIndex}-${action.title}`}
+                      index={realIndex < 0 ? actions.indexOf(action) : realIndex}
+                      action={action}
+                      depth={treeDepth(action, actions)}
+                      saving={saving}
+                      onAddEvidence={onAddEvidence}
+                      onMarkDone={onMarkDone}
+                      uploadingFile={uploadingFile}
+                      onFileUpload={onFileUpload}
+                      onOpenDrawer={() => onOpenDrawer(action, realIndex < 0 ? actions.indexOf(action) : realIndex)}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        /* Flat view */
+        <div className="space-y-3">
+          {filteredActions.map((action) => {
+            const realIndex = nodeIndexMap.get(action.node_id) ?? actions.indexOf(action);
+            return (
+              <TreeNode
+                key={`${action.node_id || realIndex}-${action.title}`}
+                index={realIndex < 0 ? actions.indexOf(action) : realIndex}
+                action={action}
+                depth={treeDepth(action, actions)}
+                saving={saving}
+                onAddEvidence={onAddEvidence}
+                onMarkDone={onMarkDone}
+                uploadingFile={uploadingFile}
+                onFileUpload={onFileUpload}
+                onOpenDrawer={() => onOpenDrawer(action, realIndex < 0 ? actions.indexOf(action) : realIndex)}
+              />
+            );
+          })}
         </div>
       )}
     </section>
@@ -312,44 +559,88 @@ function TreeNode({
   saving,
   onAddEvidence,
   onMarkDone,
+  uploadingFile,
+  onFileUpload,
+  onOpenDrawer,
 }: {
   action: ValidationAction;
   index: number;
   depth: number;
   saving: SaveState | null;
-  onAddEvidence: (index: number, text: string) => Promise<void>;
+  onAddEvidence: (actionIndex: number, text: string, grade?: string | null, sourceType?: string | null, attachmentUrl?: string | null, attachmentName?: string | null) => Promise<void>;
   onMarkDone: (index: number) => Promise<void>;
+  uploadingFile: number | null;
+  onFileUpload: (actionIndex: number, file: File) => Promise<{ url: string; name: string } | null>;
+  onOpenDrawer: () => void;
 }) {
   const [evidenceText, setEvidenceText] = useState("");
+  // P1-4: evidence grade
+  const [evidenceGrade, setEvidenceGrade] = useState<string>("");
+  // P1-5: evidence source type
+  const [evidenceSourceType, setEvidenceSourceType] = useState<string>("");
+  // P1-6: evidence attachment
+  const [attachmentFile, setAttachmentFile] = useState<{ name: string; url: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const target = Math.max(1, action.evidence_target || 3);
   const count = Math.max(action.evidence_count ?? 0, action.evidence_items?.length ?? 0);
   const evidenceRate = Math.min(100, Math.round((count / target) * 100));
   const missing = Math.max(0, target - count);
   const isAdding = saving?.key === `evidence-${index}`;
   const isDone = saving?.key === `done-${index}`;
+  const isUploading = uploadingFile === index;
 
   async function submitEvidence() {
     if (!evidenceText.trim()) return;
-    await onAddEvidence(index, evidenceText);
+    await onAddEvidence(
+      index,
+      evidenceText,
+      evidenceGrade || null,
+      evidenceSourceType || null,
+      attachmentFile?.url || null,
+      attachmentFile?.name || null
+    );
     setEvidenceText("");
+    setEvidenceGrade("");
+    setEvidenceSourceType("");
+    setAttachmentFile(null);
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const result = await onFileUpload(index, file);
+    if (result) {
+      setAttachmentFile({ name: result.name, url: result.url });
+    }
   }
 
   return (
     <article
       className={cn(
-        "rounded-2xl border bg-white px-4 py-4 shadow-[0_10px_28px_rgba(39,55,105,0.04)]",
+        "rounded-2xl border bg-white px-4 py-4 shadow-[0_10px_28px_rgba(39,55,105,0.04)] cursor-pointer transition-shadow hover:shadow-md",
         action.status === "done" ? "border-emerald-100" : missing ? "border-orange-100" : "border-line"
       )}
       style={{ marginLeft: `${Math.min(depth, 4) * 18}px` }}
+      onClick={onOpenDrawer}
+      title="点击查看完整节点详情"
     >
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
-        <div className="min-w-0">
+        <div className="min-w-0" onClick={(e) => e.stopPropagation()}>
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-lg bg-[#f0edff] px-2 py-1 text-[11px] font-black text-brand">{nodeTypeLabel(action.node_type)}</span>
             <span className={cn("rounded-lg px-2 py-1 text-[11px] font-black", actionStatusTone(action.status))}>
               {actionStatusLabel(action.status)}
             </span>
             {action.day_range && <span className="rounded-lg bg-slate-50 px-2 py-1 text-[11px] font-bold text-slate-500">{action.day_range}</span>}
+            {bestEvidenceGrade(action) && gradeShortLabels[bestEvidenceGrade(action)!] && (
+              <span className={cn("rounded-lg border px-1.5 py-0.5 text-[10px] font-black", gradeTones[bestEvidenceGrade(action)!] || "bg-slate-50 text-slate-500 border-slate-200")}>
+                证据 {gradeShortLabels[bestEvidenceGrade(action)!]}
+              </span>
+            )}
+            <span className="text-[10px] font-bold text-slate-400 hover:text-brand" title="点击打开详情抽屉">
+              详情 →
+            </span>
           </div>
           {action.branch_condition && <div className="mt-3 text-[11px] font-black text-orange-500">{action.branch_condition}</div>}
           <h3 className="mt-2 text-[16px] font-black leading-6 text-[#172452]">{action.title}</h3>
@@ -362,23 +653,9 @@ function TreeNode({
             <InfoLine label="基线" value={action.baseline || "待补充"} />
             <InfoLine label="负责人" value={action.owner || "未设置"} />
           </div>
-
-          {action.steps?.length > 0 && (
-            <div className="mt-3 rounded-xl bg-slate-50 px-3 py-3">
-              <div className="mb-2 text-[11px] font-black text-slate-400">执行步骤</div>
-              <ol className="space-y-1.5">
-                {action.steps.map((step, stepIndex) => (
-                  <li key={`${step}-${stepIndex}`} className="flex gap-2 text-[12px] font-semibold leading-5 text-[#172452]">
-                    <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-white text-[10px] font-black text-brand">{stepIndex + 1}</span>
-                    <span>{step}</span>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
         </div>
 
-        <div className="rounded-2xl bg-[#f8f9ff] px-3 py-3">
+        <div className="rounded-2xl bg-[#f8f9ff] px-3 py-3" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between text-[12px] font-black text-[#172452]">
             <span>证据进度</span>
             <span>{count}/{target} 条</span>
@@ -403,29 +680,337 @@ function TreeNode({
         </div>
       </div>
 
-      <div className="mt-4 rounded-2xl border border-line bg-white px-3 py-3">
-        <div className="flex flex-col gap-2 md:flex-row">
+      {/* Evidence input area */}
+      <div className="mt-4 rounded-2xl border border-line bg-white px-3 py-3" onClick={(e) => e.stopPropagation()}>
+        <div className="flex flex-col gap-2">
           <textarea
             value={evidenceText}
             onChange={(event) => setEvidenceText(event.target.value)}
             className="min-h-[56px] flex-1 resize-none rounded-xl border border-line bg-slate-50 px-3 py-2 text-[12px] font-semibold leading-5 text-[#172452] outline-none placeholder:text-slate-400 focus:border-brand/50"
             placeholder="录入这条节点的证据，例如：访谈 5 位目标客户，其中 3 位愿意试用，1 位愿意支付订金..."
           />
-          <button
-            type="button"
-            onClick={submitEvidence}
-            disabled={isAdding || !evidenceText.trim()}
-            className="flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-brand px-4 text-[12px] font-black text-white shadow-[0_12px_26px_rgba(101,84,255,0.24)] disabled:opacity-50 md:self-end"
-          >
-            <Icon name={isAdding ? "refresh" : "plus"} className={cn("h-3.5 w-3.5", isAdding && "animate-spin")} />
-            入账证据
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* P1-4: Evidence grade selector */}
+            <select
+              value={evidenceGrade}
+              onChange={(e) => setEvidenceGrade(e.target.value)}
+              className="h-9 rounded-xl border border-line bg-white px-2 text-[11px] font-bold text-[#172452] outline-none focus:border-brand/50"
+            >
+              <option value="">证据等级</option>
+              <option value="A">A 级 — 强证据</option>
+              <option value="B">B 级 — 中证据</option>
+              <option value="C">C 级 — 弱证据</option>
+              <option value="D">D 级 — 参考</option>
+            </select>
+            {/* P1-5: Evidence source type selector */}
+            <select
+              value={evidenceSourceType}
+              onChange={(e) => setEvidenceSourceType(e.target.value)}
+              className="h-9 rounded-xl border border-line bg-white px-2 text-[11px] font-bold text-[#172452] outline-none focus:border-brand/50"
+            >
+              <option value="">来源类型</option>
+              {Object.entries(sourceTypeLabels).map(([key, label]) => (
+                <option key={key} value={key}>{label}</option>
+              ))}
+            </select>
+            {/* P1-6: Evidence attachment */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={handleFileChange}
+              accept=".pdf,.docx,.xlsx,.pptx,.txt,.md,.png,.jpg,.jpeg,.webp"
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+              className="flex h-9 items-center gap-1 rounded-xl border border-dashed border-line bg-white px-2 text-[11px] font-bold text-slate-500 hover:border-brand/30 hover:text-brand disabled:opacity-50"
+            >
+              <Icon name={isUploading ? "refresh" : "clipboard"} className={cn("h-3 w-3", isUploading && "animate-spin")} />
+              {attachmentFile ? attachmentFile.name : "附件"}
+            </button>
+            <button
+              type="button"
+              onClick={submitEvidence}
+              disabled={isAdding || !evidenceText.trim()}
+              className="ml-auto flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-brand px-3 text-[12px] font-black text-white shadow-[0_12px_26px_rgba(101,84,255,0.24)] disabled:opacity-50"
+            >
+              <Icon name={isAdding ? "refresh" : "plus"} className={cn("h-3.5 w-3.5", isAdding && "animate-spin")} />
+              入账证据
+            </button>
+          </div>
         </div>
         {saving?.key === `evidence-${index}` && saving.message && (
           <div className="mt-2 text-[11px] font-bold text-slate-400">{saving.message}</div>
         )}
       </div>
     </article>
+  );
+}
+
+/* P1-3: Node Detail Drawer */
+function NodeDetailDrawer({
+  action,
+  index,
+  cardId,
+  saving,
+  onClose,
+  onAddEvidence,
+  onMarkDone,
+  uploadingFile,
+  onFileUpload,
+}: {
+  action: ValidationAction;
+  index: number;
+  cardId: string;
+  saving: SaveState | null;
+  onClose: () => void;
+  onAddEvidence: (actionIndex: number, text: string, grade?: string | null, sourceType?: string | null, attachmentUrl?: string | null, attachmentName?: string | null) => Promise<void>;
+  onMarkDone: (index: number) => Promise<void>;
+  uploadingFile: number | null;
+  onFileUpload: (actionIndex: number, file: File) => Promise<{ url: string; name: string } | null>;
+}) {
+  const [evidenceText, setEvidenceText] = useState("");
+  const [evidenceGrade, setEvidenceGrade] = useState<string>("");
+  const [evidenceSourceType, setEvidenceSourceType] = useState<string>("");
+  const [attachmentFile, setAttachmentFile] = useState<{ name: string; url: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const target = Math.max(1, action.evidence_target || 3);
+  const count = Math.max(action.evidence_count ?? 0, action.evidence_items?.length ?? 0);
+  const evidenceRate = Math.min(100, Math.round((count / target) * 100));
+  const missing = Math.max(0, target - count);
+  const isAdding = saving?.key === `evidence-${index}`;
+  const isDone = saving?.key === `done-${index}`;
+  const isUploading = uploadingFile === index;
+
+  async function submitEvidence() {
+    if (!evidenceText.trim()) return;
+    await onAddEvidence(
+      index,
+      evidenceText,
+      evidenceGrade || null,
+      evidenceSourceType || null,
+      attachmentFile?.url || null,
+      attachmentFile?.name || null
+    );
+    setEvidenceText("");
+    setEvidenceGrade("");
+    setEvidenceSourceType("");
+    setAttachmentFile(null);
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const result = await onFileUpload(index, file);
+    if (result) {
+      setAttachmentFile({ name: result.name, url: result.url });
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-end">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/20" onClick={onClose} />
+      {/* Drawer */}
+      <div className="relative z-10 flex h-full w-full max-w-lg flex-col overflow-y-auto bg-white shadow-2xl">
+        {/* Header */}
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-white px-5 py-4">
+          <div className="min-w-0">
+            <h2 className="text-[17px] font-black text-ink truncate">节点详情</h2>
+            <p className="mt-0.5 text-[11px] font-semibold text-slate-400">节点 #{index + 1}</p>
+          </div>
+          <button type="button" onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-slate-100">
+            <Icon name="x" className="h-4 w-4 text-slate-400" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 space-y-4 px-5 py-4">
+          {/* Status badges */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-lg bg-[#f0edff] px-2 py-1 text-[11px] font-black text-brand">{nodeTypeLabel(action.node_type)}</span>
+            <span className={cn("rounded-lg px-2 py-1 text-[11px] font-black", actionStatusTone(action.status))}>
+              {actionStatusLabel(action.status)}
+            </span>
+            {action.day_range && <span className="rounded-lg bg-slate-50 px-2 py-1 text-[11px] font-bold text-slate-500">{action.day_range}</span>}
+          </div>
+
+          {action.branch_condition && (
+            <div className="rounded-xl bg-orange-50 px-3 py-2 text-[12px] font-black text-orange-500">{action.branch_condition}</div>
+          )}
+
+          <div>
+            <h3 className="text-[20px] font-black leading-7 text-[#172452]">{action.title}</h3>
+            <p className="mt-2 text-[13px] font-semibold leading-6 text-slate-500">{action.objective || "待补充"}</p>
+          </div>
+
+          <div className="rounded-2xl bg-slate-50 p-4 space-y-3">
+            <DetailRow label="假设基础" value={action.grounded_on || "待补充"} icon="flag" />
+            <DetailRow label="成功标准" value={action.success_metric} icon="target" />
+            <DetailRow label="验证对象" value={action.target || "待补充"} icon="users" />
+            <DetailRow label="基线" value={action.baseline || "待补充"} icon="activity" />
+            <DetailRow label="负责人" value={action.owner || "未设置"} icon="user" />
+            <DetailRow label="预计时间" value={action.day_range} icon="clock" />
+          </div>
+
+          {action.steps?.length > 0 && (
+            <div className="rounded-2xl bg-[#f7f8ff] px-4 py-4">
+              <div className="mb-3 text-[12px] font-black text-brand">执行步骤</div>
+              <ol className="space-y-2">
+                {action.steps.map((step, stepIndex) => (
+                  <li key={`drawer-step-${stepIndex}`} className="flex gap-3 text-[12px] font-semibold leading-6 text-[#172452]">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand text-[10px] font-black text-white">{stepIndex + 1}</span>
+                    <span>{step}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+
+          {/* Evidence section in drawer */}
+          <div className="rounded-2xl bg-white border border-line p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-[14px] font-black text-ink">证据记录 ({count}/{target})</h4>
+              <div className="flex items-center gap-1.5">
+                <span className={cn("text-[11px] font-bold", missing ? "text-orange-500" : "text-emerald-600")}>
+                  {missing ? `缺 ${missing} 条` : "已满足"}
+                </span>
+              </div>
+            </div>
+
+            {/* Existing evidence items */}
+            {action.evidence_items && action.evidence_items.length > 0 ? (
+              <div className="mb-4 space-y-2">
+                {action.evidence_items.map((item, eiIndex) => (
+                  <div key={`dr-ei-${eiIndex}`} className="rounded-xl bg-slate-50 px-3 py-2">
+                    <div className="text-[12px] font-semibold leading-5 text-[#172452]">{item.text}</div>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
+                      {item.grade && (
+                        <span className={cn("rounded-md border px-1.5 py-0.5 font-black", gradeTones[item.grade] || "")}>
+                          {gradeShortLabels[item.grade]} 级
+                        </span>
+                      )}
+                      {item.source_type && (
+                        <span className="rounded-md bg-slate-200 px-1.5 py-0.5 font-bold text-slate-500">
+                          {sourceTypeLabels[item.source_type] || item.source_type}
+                        </span>
+                      )}
+                      {item.attachment_name && (
+                        <a href={item.attachment_url || "#"} target="_blank" rel="noopener noreferrer" className="rounded-md bg-blue-50 px-1.5 py-0.5 font-bold text-blue-600 underline">
+                          📎 {item.attachment_name}
+                        </a>
+                      )}
+                      {item.created_at && (
+                        <span className="text-slate-400">{formatTime(item.created_at)}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mb-4 rounded-xl bg-slate-50 px-3 py-3 text-center text-[11px] font-bold text-slate-400">暂无证据记录</div>
+            )}
+
+            {/* Add evidence in drawer */}
+            <div className="space-y-2">
+              <textarea
+                value={evidenceText}
+                onChange={(e) => setEvidenceText(e.target.value)}
+                className="min-h-[56px] w-full resize-none rounded-xl border border-line bg-slate-50 px-3 py-2 text-[12px] font-semibold leading-5 text-[#172452] outline-none placeholder:text-slate-400 focus:border-brand/50"
+                placeholder="添加证据..."
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <select value={evidenceGrade} onChange={(e) => setEvidenceGrade(e.target.value)} className="h-9 rounded-xl border border-line bg-white px-2 text-[11px] font-bold text-[#172452] outline-none focus:border-brand/50">
+                  <option value="">证据等级</option>
+                  <option value="A">A 级 — 强证据</option>
+                  <option value="B">B 级 — 中证据</option>
+                  <option value="C">C 级 — 弱证据</option>
+                  <option value="D">D 级 — 参考</option>
+                </select>
+                <select value={evidenceSourceType} onChange={(e) => setEvidenceSourceType(e.target.value)} className="h-9 rounded-xl border border-line bg-white px-2 text-[11px] font-bold text-[#172452] outline-none focus:border-brand/50">
+                  <option value="">来源类型</option>
+                  {Object.entries(sourceTypeLabels).map(([key, label]) => (
+                    <option key={key} value={key}>{label}</option>
+                  ))}
+                </select>
+                <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileChange} accept=".pdf,.docx,.xlsx,.pptx,.txt,.md,.png,.jpg,.jpeg,.webp" />
+                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading}
+                  className="flex h-9 items-center gap-1 rounded-xl border border-dashed border-line bg-white px-2 text-[11px] font-bold text-slate-500 hover:border-brand/30 disabled:opacity-50">
+                  <Icon name={isUploading ? "refresh" : "clipboard"} className={cn("h-3 w-3", isUploading && "animate-spin")} />
+                  {attachmentFile ? attachmentFile.name : "附件"}
+                </button>
+                <button type="button" onClick={submitEvidence} disabled={isAdding || !evidenceText.trim()}
+                  className="ml-auto flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-brand px-3 text-[12px] font-black text-white disabled:opacity-50">
+                  <Icon name={isAdding ? "refresh" : "plus"} className={cn("h-3.5 w-3.5", isAdding && "animate-spin")} />
+                  入账
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="sticky bottom-0 border-t border-line bg-white px-5 py-4 flex items-center justify-between gap-3">
+          <button type="button" onClick={onClose} className="flex h-9 items-center rounded-xl border border-line bg-white px-4 text-[12px] font-black text-slate-500 hover:bg-slate-50">
+            关闭
+          </button>
+          <button
+            type="button"
+            onClick={() => onMarkDone(index)}
+            disabled={isDone || action.status === "done"}
+            className="flex h-9 items-center gap-1.5 rounded-xl bg-brand px-4 text-[12px] font-black text-white disabled:opacity-50"
+          >
+            <Icon name={isDone ? "refresh" : "check"} className={cn("h-3.5 w-3.5", isDone && "animate-spin")} />
+            {action.status === "done" ? "已完成" : "标记完成"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailRow({ label, value, icon }: { label: string; value: string; icon: string }) {
+  return (
+    <div className="flex items-start gap-2">
+      <Icon name={icon} className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+      <div className="min-w-0">
+        <div className="text-[11px] font-black text-slate-400">{label}</div>
+        <div className="text-[13px] font-bold leading-5 text-[#172452]">{value || "待补充"}</div>
+      </div>
+    </div>
+  );
+}
+
+/* P1-8: Read-only case summary — shown after review submitted */
+function ReadOnlyCaseSummary({ card }: { card: ValidationCard }) {
+  return (
+    <section className="dashboard-card rounded-2xl px-5 py-5 border-2 border-emerald-100 bg-gradient-to-br from-emerald-50/50 to-white">
+      <div className="flex items-center gap-2 mb-4">
+        <Icon name="check-circle" className="h-5 w-5 text-emerald-500" />
+        <h2 className="text-[17px] font-black text-emerald-700">复盘结论（只读）</h2>
+      </div>
+      <div className="space-y-3">
+        <CaseSummaryRow label="最终决策" value={resultLabel(card.result || "")} tone={resultTone(card.result)} />
+        <CaseSummaryRow label="实际结果" value={card.actual_outcome || "未填写"} />
+        <CaseSummaryRow label="复盘学习" value={card.learnings || "未填写"} />
+        <CaseSummaryRow label="复盘时间" value={card.validated_at ? formatTime(card.validated_at) : "未记录"} />
+      </div>
+      <p className="mt-4 text-[11px] font-semibold text-slate-400">
+        此验证卡已提交复盘，以上结论为只读记录。如需修改请在工作台操作。
+      </p>
+    </section>
+  );
+}
+
+function CaseSummaryRow({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="flex items-center justify-between py-1 border-b border-emerald-100 last:border-0">
+      <span className="text-[12px] font-bold text-slate-500">{label}</span>
+      <span className={cn("text-[12px] font-black", tone || "text-[#172452]")}>{value}</span>
+    </div>
   );
 }
 
@@ -446,12 +1031,32 @@ function EvidenceSection({ actions }: { actions: ValidationAction[] }) {
       ) : (
         <div className="divide-y divide-line">
           {rows.map(({ action, item, actionIndex, index }) => (
-            <div key={`${action.node_id || actionIndex}-${index}`} className="grid gap-3 py-3 md:grid-cols-[200px_1fr_120px]">
+            <div key={`${action.node_id || actionIndex}-${index}`} className="grid gap-3 py-3 md:grid-cols-[200px_1fr_100px]">
               <div>
                 <div className="text-[11px] font-black text-brand">节点 {actionIndex + 1}</div>
                 <div className="mt-1 line-clamp-2 text-[12px] font-black leading-5 text-[#172452]">{action.title}</div>
               </div>
-              <div className="rounded-xl bg-slate-50 px-3 py-2 text-[13px] font-bold leading-6 text-[#172452]">{item.text}</div>
+              <div>
+                <div className="rounded-xl bg-slate-50 px-3 py-2 text-[13px] font-bold leading-6 text-[#172452]">{item.text}</div>
+                {item.grade && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    <span className={cn("inline-block rounded-md border px-1.5 py-0.5 text-[10px] font-black", gradeTones[item.grade] || "")}>
+                      {gradeShortLabels[item.grade]} 级证据
+                    </span>
+                    {item.source_type && (
+                      <span className="inline-block rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">
+                        {sourceTypeLabels[item.source_type] || item.source_type}
+                      </span>
+                    )}
+                    {item.attachment_name && (
+                      <a href={item.attachment_url || "#"} target="_blank" rel="noopener noreferrer"
+                        className="inline-block rounded-md bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-blue-600 underline">
+                        📎 {item.attachment_name}
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
               <div className="text-right text-[11px] font-semibold text-slate-400">{item.created_at ? formatTime(item.created_at) : ""}</div>
             </div>
           ))}
@@ -685,6 +1290,84 @@ function chatHref(card: ValidationCard): string {
   qs.set("validationCardId", card.id);
   qs.set("focus", "1");
   return `/chat?${qs.toString()}`;
+}
+
+/* P1-7: Export validation card to Markdown */
+function exportMarkdown(card: ValidationCard) {
+  const lines: string[] = [];
+  lines.push(`# ${card.title}`);
+  lines.push("");
+  lines.push(`> 状态: ${statusLabel(card.status)} | 复盘: ${card.result ? resultLabel(card.result) : "未复盘"}`);
+  if (card.target_customer) lines.push(`> 目标客户: ${card.target_customer}`);
+  if (card.biggest_uncertainty) lines.push(`> 最大不确定性: ${card.biggest_uncertainty}`);
+  lines.push("");
+
+  lines.push("## 决策树节点");
+  lines.push("");
+  for (let i = 0; i < card.actions.length; i++) {
+    const a = card.actions[i];
+    lines.push(`### ${i + 1}. ${a.title}  \`${actionStatusLabel(a.status)}\``);
+    if (a.objective) lines.push(`- **目标**: ${a.objective}`);
+    if (a.grounded_on) lines.push(`- **假设**: ${a.grounded_on}`);
+    if (a.success_metric) lines.push(`- **成功标准**: ${a.success_metric}`);
+    if (a.target) lines.push(`- **验证对象**: ${a.target}`);
+    if (a.day_range) lines.push(`- **时间**: ${a.day_range}`);
+    if (a.evidence_items && a.evidence_items.length > 0) {
+      lines.push(`- **证据** (${a.evidence_items.length} 条):`);
+      for (const e of a.evidence_items) {
+        const meta: string[] = [];
+        if (e.grade) meta.push(`${gradeShortLabels[e.grade] || e.grade}级`);
+        if (e.source_type) meta.push(sourceTypeLabels[e.source_type] || e.source_type);
+        const metaStr = meta.length ? ` *(${meta.join(", ")})*` : "";
+        lines.push(`  - ${e.text}${metaStr}`);
+      }
+    }
+    lines.push("");
+  }
+
+  if (card.decision_criteria) {
+    lines.push("## 继续/调整/暂停标准");
+    lines.push("");
+    if (card.decision_criteria.continue_when) lines.push(`- **继续**: ${card.decision_criteria.continue_when}`);
+    if (card.decision_criteria.adjust_when) lines.push(`- **调整**: ${card.decision_criteria.adjust_when}`);
+    if (card.decision_criteria.pause_when) lines.push(`- **暂停**: ${card.decision_criteria.pause_when}`);
+    lines.push("");
+  }
+
+  if (card.result) {
+    lines.push("## 复盘结论");
+    lines.push("");
+    lines.push(`- **决策**: ${resultLabel(card.result)}`);
+    if (card.actual_outcome) lines.push(`- **实际结果**: ${card.actual_outcome}`);
+    if (card.learnings) lines.push(`- **复盘学习**: ${card.learnings}`);
+  }
+
+  const md = lines.join("\n");
+  const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${card.title.replace(/[<>:"/\\\\|?*]/g, "_").slice(0, 50)}_验证卡.md`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+
+/** Return the highest evidence grade across all items for an action. */
+function bestEvidenceGrade(action: ValidationAction): string | null {
+  const items = action.evidence_items ?? [];
+  if (!items.length) return null;
+  const ranks: Record<string, number> = { A: 4, B: 3, C: 2, D: 1 };
+  let best = '';
+  let bestRank = 0;
+  for (const item of items) {
+    const g = item.grade || '';
+    const r = ranks[g] || 0;
+    if (r > bestRank) { bestRank = r; best = g; }
+  }
+  return best || null;
 }
 
 function nodeTypeLabel(value: string): string {

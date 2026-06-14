@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+import re
+from pathlib import Path as _Path
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_llm, get_reviewer_pool
+from app.core.config import get_settings
 from app.db.base import utc_now
 from app.db.models.auth import AuthUser
 from app.db.session import get_db
@@ -128,3 +132,41 @@ def submit_validation_review(
         raise HTTPException(status_code=404, detail="验证卡不存在")
     card = validation_card_service.submit_review(db, card, payload)
     return ValidationCardOut.model_validate(card)
+
+
+@router.post("/{card_id}/attachments")
+async def upload_evidence_attachment(
+    card_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(get_current_user),
+):
+    """上传证据附件，返回 URL 供前端拼入 evidence_item.attachment_url。"""
+    card = validation_card_service.get_owned_card(db, card_id, user)
+    if not card:
+        raise HTTPException(status_code=404, detail="验证卡不存在")
+    settings = get_settings()
+    upload_dir = _Path(settings.storage_dir) / "evidence_attachments" / card_id
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = _safe_upload_name(file.filename)
+    dest = upload_dir / safe_name
+    # 去重：已存在则加序号
+    counter = 1
+    stem, suffix = _Path(safe_name).stem, _Path(safe_name).suffix
+    while dest.exists():
+        dest = upload_dir / f"{stem}_{counter}{suffix}"
+        counter += 1
+    content_bytes = await file.read()
+    dest.write_bytes(content_bytes)
+    return {
+        "url": f"/uploads/evidence_attachments/{card_id}/{dest.name}",
+        "name": file.filename,
+        "size": len(content_bytes),
+    }
+
+
+def _safe_upload_name(filename: str | None) -> str:
+    """Keep uploaded evidence attachments inside the card directory."""
+    raw = _Path(filename or "attachment").name.strip() or "attachment"
+    safe = re.sub(r"[^A-Za-z0-9._\-\u4e00-\u9fff]", "_", raw)
+    return safe[:160] or "attachment"

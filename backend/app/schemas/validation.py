@@ -9,10 +9,26 @@ ValidationStatus = Literal["draft", "running", "completed", "archived"]
 ValidationResult = Literal["achieved", "not_achieved", "partially_achieved"]
 ValidationActionStatus = Literal["todo", "running", "done", "blocked"]
 ValidationFinalDecision = Literal["continue", "adjust", "pause"]
+ValidationEvidenceGrade = Literal["A", "B", "C", "D"]
+ValidationEvidenceSourceType = Literal[
+    "user_interview",
+    "customer_feedback",
+    "paid_intent",
+    "channel_quote",
+    "cost_estimate",
+    "market_data",
+    "expert_opinion",
+    "document",
+    "other",
+]
 
 
 class ValidationEvidenceItem(BaseModel):
     text: str
+    grade: ValidationEvidenceGrade | None = None
+    source_type: ValidationEvidenceSourceType | None = None
+    attachment_url: str | None = None
+    attachment_name: str | None = None
     created_at: str | None = None
 
 
@@ -45,6 +61,7 @@ class ValidationActionPatch(BaseModel):
     progress: int | None = Field(default=None, ge=0, le=100)
     evidence_count: int | None = Field(default=None, ge=0)
     evidence_note: str | None = Field(default=None, max_length=2000)
+    evidence_item: ValidationEvidenceItem | None = None
     owner: str | None = None
     due_at: datetime | None = None
     completed_at: datetime | None = None

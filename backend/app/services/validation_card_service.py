@@ -142,17 +142,41 @@ def update_action(
         raise IndexError("验证动作不存在")
     action = dict(actions[action_index])
     now = utc_now()
-    if payload.evidence_note is not None and payload.evidence_note.strip():
-        note = payload.evidence_note.strip()
+    has_evidence_note = payload.evidence_note is not None and payload.evidence_note.strip()
+    has_evidence_item = payload.evidence_item is not None and payload.evidence_item.text.strip()
+    if has_evidence_note or has_evidence_item:
         items = list(action.get("evidence_items") or [])
-        items.append({"text": note, "created_at": now.isoformat()})
+        entry: dict = {"created_at": now.isoformat()}
+        if has_evidence_item:
+            item = payload.evidence_item  # type: ignore[union-attr]
+            entry["text"] = item.text.strip()
+            if item.grade:
+                entry["grade"] = item.grade
+            if item.source_type:
+                entry["source_type"] = item.source_type
+            if item.attachment_url:
+                entry["attachment_url"] = item.attachment_url
+            if item.attachment_name:
+                entry["attachment_name"] = item.attachment_name
+            evidence_text = item.text.strip()
+            evidence_meta = {
+                "user_grade": item.grade,
+                "user_source_type": item.source_type,
+                "attachment_url": item.attachment_url,
+                "attachment_name": item.attachment_name,
+            }
+        else:
+            evidence_text = payload.evidence_note.strip()  # type: ignore[union-attr]
+            entry["text"] = evidence_text
+            evidence_meta = {}
+        items.append(entry)
         action["evidence_items"] = items
         action["evidence_count"] = len(items)
         if action.get("status") == "todo":
             action["status"] = "running"
         if _int(action.get("progress"), 0) < 90:
             action["progress"] = min(90, _int(action.get("progress"), 0) + 15)
-        _ledger_evidence(db, card, note, action_index, llm, reviewers)
+        _ledger_evidence(db, card, evidence_text, action_index, llm, reviewers, evidence_meta)
         _record_bach_prediction(db, card)
     if payload.status is not None:
         action["status"] = payload.status
@@ -194,10 +218,11 @@ def _ledger_evidence(
     action_index: int,
     llm: LLMService | None,
     reviewers: tuple[LLMService, ...] | list[LLMService] | None = None,
+    evidence_meta: dict | None = None,
 ) -> None:
     """证据同步进 BACH 账本（异构评审聚合）并更新假设置信度。失败不阻塞动作更新。"""
     try:
-        tianji_bach_service.record_evidence(
+        record = tianji_bach_service.record_evidence(
             db,
             card,
             content=note,
@@ -206,6 +231,16 @@ def _ledger_evidence(
             llm=llm,
             reviewers=reviewers,
         )
+        clean_meta = {
+            key: value
+            for key, value in (evidence_meta or {}).items()
+            if value is not None and str(value).strip()
+        }
+        if record is not None and clean_meta:
+            detail = dict(record.review_detail or {})
+            detail["validation_evidence"] = clean_meta
+            record.review_detail = detail
+            db.add(record)
     except Exception:  # noqa: BLE001
         pass
 

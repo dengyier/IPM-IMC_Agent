@@ -10,14 +10,15 @@ from app.db.models import (
     MethodologyEdge,
     MethodologyNode,
     Project,
+    TianjiPrediction,
     ValidationCard,
 )
 from app.db.models.auth import AuthUser
 from app.schemas.diagnosis import RoutingDecision
 from app.services.context_fusion_service import ContextFusionService
-from app.schemas.validation import ValidationCardUpdate
+from app.schemas.validation import ValidationCardUpdate, ValidationReviewSubmit
 from app.services.dashboard_service import DashboardService
-from app.services import project_service
+from app.services import decision_case_service, project_service, validation_card_service
 
 
 def _session():
@@ -117,6 +118,69 @@ def test_history_context_summarizes_recent_reports_and_failed_validation_cards()
     assert "未达成" in context
     assert "付费承诺是假设短板" in context
     assert len(context) <= 1800
+
+
+def test_day7_review_resolves_predictions_and_exposes_decision_case():
+    db = _session()
+    user = _user()
+    db.add(user)
+    project = Project(
+        id="project-1",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        name="GEO 服务验证",
+        status="validating",
+        meta={"planned_investment": "30万"},
+    )
+    card = ValidationCard(
+        id="card-1",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        project_id="project-1",
+        title="验证付费承诺",
+        biggest_uncertainty="客户是否愿意支付订金。",
+        failure_reason="客户只有兴趣但不愿承诺。",
+        status="running",
+    )
+    prediction = TianjiPrediction(
+        tenant_id="tenant-1",
+        case_id="card-1",
+        verdict="adjust",
+        probability=0.42,
+        probability_raw=0.42,
+        kill_criteria=[],
+    )
+    db.add_all([project, card, prediction])
+    db.commit()
+
+    updated = validation_card_service.submit_review(
+        db,
+        card,
+        ValidationReviewSubmit(
+            final_decision="pause",
+            interview_count=8,
+            paid_intent_count=0,
+            rejection_reasons=["没有预算", "不是当前优先级"],
+            actual_outcome="8 位客户都只愿意了解，没有人愿意支付订金。",
+            learnings="口头兴趣不能替代付费承诺。",
+        ),
+    )
+
+    db.refresh(project)
+    db.refresh(prediction)
+    assert updated.status == "completed"
+    assert updated.result == "not_achieved"
+    assert project.status == "paused"
+    assert project.meta["last_validation_decision"] == "pause"
+    assert prediction.outcome == 0.0
+    assert prediction.brier == round(0.42**2, 4)
+
+    cases = decision_case_service.list_cases(db, user)
+    assert len(cases) == 1
+    assert cases[0].validation_card_id == "card-1"
+    assert cases[0].decision == "暂停"
+    assert cases[0].saved_investment_estimate == "30万"
+    assert "没有预算" in cases[0].failure_patterns
 
 
 class DummyEmbeddings:
