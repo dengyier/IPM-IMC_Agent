@@ -42,6 +42,7 @@ type WorkbenchMaterial = {
   chars: number;
   chunkCount: number;
   message?: string;
+  imageNote?: string;
 };
 
 export function ValidationWorkbenchPage() {
@@ -50,6 +51,9 @@ export function ValidationWorkbenchPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [plannedInvestment, setPlannedInvestment] = useState("");
+  const [decisionDeadline, setDecisionDeadline] = useState("");
+  const [targetCustomer, setTargetCustomer] = useState("");
   const [evidenceFor, setEvidenceFor] = useState<number | null>(null);
   const [evidenceText, setEvidenceText] = useState("");
   const [materials, setMaterials] = useState<WorkbenchMaterial[]>([]);
@@ -78,7 +82,9 @@ export function ValidationWorkbenchPage() {
   const project = summary?.current_project ?? null;
   const hasTask = Boolean(summary?.has_data && summary.current_card_id);
   const readyMaterials = materials.filter((item) => ["ready", "image_ready", "deposited"].includes(item.status));
-  const hasDraft = draft.trim().length > 0 || readyMaterials.length > 0;
+  const hasStructuredFacts =
+    plannedInvestment.trim().length > 0 || decisionDeadline.length > 0 || targetCustomer.trim().length > 0;
+  const hasDraft = draft.trim().length > 0 || readyMaterials.length > 0 || hasStructuredFacts;
   const actionProgress = useMemo(() => {
     const actions = summary?.actions ?? [];
     if (!actions.length) return 0;
@@ -93,8 +99,11 @@ export function ValidationWorkbenchPage() {
     try {
       const createdProject = await projectApi.create({
         name: (draft.trim() || readyMaterials[0]?.filename || text).slice(0, 48),
+        target_customer: targetCustomer.trim(),
         current_problem: text,
         task_pack: "new_project",
+        planned_investment: plannedInvestment.trim() || null,
+        decision_deadline: decisionDeadline || null,
       });
       await validationCardApi.create({
         project_id: createdProject.id,
@@ -102,6 +111,9 @@ export function ValidationWorkbenchPage() {
         project_description: text,
       });
       setDraft("");
+      setPlannedInvestment("");
+      setDecisionDeadline("");
+      setTargetCustomer("");
       setMaterials([]);
       setMaterialConversationId(null);
       await load();
@@ -211,11 +223,21 @@ export function ValidationWorkbenchPage() {
       const kind = item.status === "image_ready" ? "图片材料（待OCR/人工描述）" : "文档材料";
       const deposit = item.sourceId ? `，已沉淀资料中心 source_id=${item.sourceId}` : "";
       const parsed = item.chunkCount > 0 ? `，已解析 ${item.chunkCount} 个片段/${item.chars} 字` : "";
-      return `${index + 1}. ${item.filename}：${kind}${parsed}${deposit}`;
+      const note = item.imageNote?.trim() ? `\n   图片关键信息：${item.imageNote.trim()}` : "";
+      return `${index + 1}. ${item.filename}：${kind}${parsed}${deposit}${note}`;
     });
-    if (!rows.length) return base;
+    const facts = [
+      plannedInvestment.trim() ? `计划投入：${plannedInvestment.trim()}` : null,
+      decisionDeadline ? `决策期限：${decisionDeadline}` : null,
+      targetCustomer.trim() ? `目标客户：${targetCustomer.trim()}` : null,
+    ].filter(Boolean);
+    const factBlock = facts.length ? ["", "结构化决策信息：", ...facts] : [];
+    if (!rows.length) {
+      return [base || "请基于以下信息，判断未来30天内最需要验证的投入决策。", ...factBlock].join("\n");
+    }
     return [
       base || "请基于我上传的材料，判断未来30天内最需要验证的投入决策。",
+      ...factBlock,
       "",
       "已上传验证材料：",
       ...rows,
@@ -332,6 +354,27 @@ export function ValidationWorkbenchPage() {
               </button>
             </div>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="grid w-full gap-2 md:grid-cols-3">
+                <input
+                  value={plannedInvestment}
+                  onChange={(event) => setPlannedInvestment(event.target.value)}
+                  className="h-10 rounded-xl border border-line bg-white px-3 text-[12px] font-semibold text-[#172452] outline-none placeholder:text-slate-400 focus:border-brand/50"
+                  placeholder="计划投入，如：30万"
+                />
+                <input
+                  type="date"
+                  value={decisionDeadline}
+                  onChange={(event) => setDecisionDeadline(event.target.value)}
+                  className="h-10 rounded-xl border border-line bg-white px-3 text-[12px] font-semibold text-[#172452] outline-none focus:border-brand/50"
+                  title="决策期限"
+                />
+                <input
+                  value={targetCustomer}
+                  onChange={(event) => setTargetCustomer(event.target.value)}
+                  className="h-10 rounded-xl border border-line bg-white px-3 text-[12px] font-semibold text-[#172452] outline-none placeholder:text-slate-400 focus:border-brand/50"
+                  placeholder="目标客户，如：中小企业老板"
+                />
+              </div>
               <div className="flex flex-wrap items-center gap-2 text-[12px] font-semibold text-slate-500">
                 <input
                   ref={fileInputRef}
@@ -373,6 +416,11 @@ export function ValidationWorkbenchPage() {
                     depositing={depositingMaterialId === material.localId}
                     disabled={saving || uploadingMaterial}
                     onDeposit={() => depositMaterial(material)}
+                    onNoteChange={(imageNote) =>
+                      setMaterials((prev) =>
+                        prev.map((item) => (item.localId === material.localId ? { ...item, imageNote } : item))
+                      )
+                    }
                     onRemove={() => removeMaterial(material.localId)}
                   />
                 ))}
@@ -624,12 +672,14 @@ function MaterialRow({
   depositing,
   disabled,
   onDeposit,
+  onNoteChange,
   onRemove,
 }: {
   material: WorkbenchMaterial;
   depositing: boolean;
   disabled: boolean;
   onDeposit: () => void;
+  onNoteChange: (value: string) => void;
   onRemove: () => void;
 }) {
   const isImage = material.status === "image_ready";
@@ -654,39 +704,50 @@ function MaterialRow({
           : "bg-[#f0edff] text-brand";
 
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-line bg-white px-3 py-2 text-left">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-50 text-brand">
-        <Icon name={isImage ? "file" : "file-text"} className="h-4 w-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-[12px] font-black text-[#172452]">{material.filename}</span>
-          <span className={cn("shrink-0 rounded-lg px-2 py-0.5 text-[10px] font-black", tone)}>{statusText}</span>
+    <div className="rounded-2xl border border-line bg-white px-3 py-2 text-left">
+      <div className="flex items-center gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-50 text-brand">
+          <Icon name={isImage ? "file" : "file-text"} className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-[12px] font-black text-[#172452]">{material.filename}</span>
+            <span className={cn("shrink-0 rounded-lg px-2 py-0.5 text-[10px] font-black", tone)}>{statusText}</span>
+          </div>
+          <div className="mt-0.5 truncate text-[11px] font-semibold text-slate-400">
+            {material.message || `${formatFileSize(material.file.size)} · ${material.chunkCount} 个片段`}
+          </div>
         </div>
-        <div className="mt-0.5 truncate text-[11px] font-semibold text-slate-400">
-          {material.message || `${formatFileSize(material.file.size)} · ${material.chunkCount} 个片段`}
-        </div>
-      </div>
-      {ready && material.status !== "deposited" && material.fileId && (
+        {ready && material.status !== "deposited" && material.fileId && (
+          <button
+            type="button"
+            onClick={onDeposit}
+            disabled={disabled || depositing}
+            className="flex h-8 shrink-0 items-center gap-1 rounded-lg border border-brand/20 bg-white px-2.5 text-[11px] font-black text-brand hover:bg-[#f7f5ff] disabled:opacity-45"
+          >
+            <Icon name={depositing ? "refresh" : "archive"} className={cn("h-3.5 w-3.5", depositing && "animate-spin")} />
+            {depositing ? "沉淀中" : "同步资料中心"}
+          </button>
+        )}
         <button
           type="button"
-          onClick={onDeposit}
-          disabled={disabled || depositing}
-          className="flex h-8 shrink-0 items-center gap-1 rounded-lg border border-brand/20 bg-white px-2.5 text-[11px] font-black text-brand hover:bg-[#f7f5ff] disabled:opacity-45"
+          onClick={onRemove}
+          disabled={disabled || depositing || material.status === "uploading"}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-300 hover:bg-rose-50 hover:text-rose-500 disabled:opacity-40"
+          title="移除材料"
         >
-          <Icon name={depositing ? "refresh" : "archive"} className={cn("h-3.5 w-3.5", depositing && "animate-spin")} />
-          {depositing ? "沉淀中" : "同步资料中心"}
+          <Icon name="x" className="h-3.5 w-3.5" />
         </button>
+      </div>
+      {isImage && ready && (
+        <input
+          value={material.imageNote || ""}
+          onChange={(event) => onNoteChange(event.target.value)}
+          disabled={disabled || depositing}
+          className="mt-2 h-9 w-full rounded-xl border border-orange-100 bg-orange-50/40 px-3 text-[12px] font-semibold text-[#172452] outline-none placeholder:text-orange-400 focus:border-orange-300 disabled:opacity-55"
+          placeholder="补充图片关键信息，如截图里的客户原话、报价、表格结论"
+        />
       )}
-      <button
-        type="button"
-        onClick={onRemove}
-        disabled={disabled || depositing || material.status === "uploading"}
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-300 hover:bg-rose-50 hover:text-rose-500 disabled:opacity-40"
-        title="移除材料"
-      >
-        <Icon name="x" className="h-3.5 w-3.5" />
-      </button>
     </div>
   );
 }

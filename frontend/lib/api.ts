@@ -671,6 +671,8 @@ export interface Project {
   updated_at: string;
   report_count: number;
   last_diagnosed_at: string | null;
+  planned_investment: string | null;
+  decision_deadline: string | null;
 }
 
 export interface ProjectCreateRequest {
@@ -679,10 +681,12 @@ export interface ProjectCreateRequest {
   target_customer?: string;
   current_problem?: string;
   task_pack?: ProjectTaskPack;
+  planned_investment?: string | null;
+  decision_deadline?: string | null;
 }
 
 export type ProjectUpdateRequest = Partial<
-  Pick<Project, "name" | "industry" | "target_customer" | "current_problem" | "status">
+  Pick<Project, "name" | "industry" | "target_customer" | "current_problem" | "status" | "planned_investment" | "decision_deadline">
 >;
 
 export const projectApi = {

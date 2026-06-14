@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.api.routers.project import create_project, update_project
 from app.api.routers.validation import update_validation_card
 from app.db.base import Base
 from app.db.models import (
@@ -15,6 +16,7 @@ from app.db.models import (
 )
 from app.db.models.auth import AuthUser
 from app.schemas.diagnosis import RoutingDecision
+from app.schemas.project import ProjectCreate, ProjectUpdate
 from app.services.context_fusion_service import ContextFusionService
 from app.schemas.validation import ValidationCardUpdate, ValidationReviewSubmit
 from app.services.dashboard_service import DashboardService
@@ -60,6 +62,36 @@ def test_validation_card_patch_records_validation_feedback():
     assert updated.actual_outcome == "客户愿意试用，但没有人愿意支付定金。"
     assert updated.learnings == "付费意愿低于口头兴趣，需重构价值主张。"
     assert updated.validated_at is not None
+
+
+def test_project_create_and_update_exposes_validation_decision_facts():
+    db = _session()
+    user = _user()
+
+    created = create_project(
+        ProjectCreate(
+            name="GEO 服务验证",
+            target_customer="中小企业老板",
+            current_problem="是否投入新产品化服务",
+            planned_investment="30万",
+            decision_deadline="2026-07-15",
+        ),
+        db=db,
+        user=user,
+    )
+
+    assert created.planned_investment == "30万"
+    assert created.decision_deadline == "2026-07-15"
+
+    updated = update_project(
+        created.id,
+        ProjectUpdate(planned_investment="50万", decision_deadline="2026-08-01"),
+        db=db,
+        user=user,
+    )
+
+    assert updated.planned_investment == "50万"
+    assert updated.decision_deadline == "2026-08-01"
 
 
 def test_history_context_summarizes_recent_reports_and_failed_validation_cards():

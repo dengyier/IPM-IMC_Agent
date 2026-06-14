@@ -15,6 +15,8 @@ class ProjectCreate(BaseModel):
     target_customer: str = ""
     current_problem: str = ""
     task_pack: TaskPack = "new_project"
+    planned_investment: str | None = Field(default=None, max_length=80)
+    decision_deadline: str | None = Field(default=None, max_length=40)
 
 
 class ProjectUpdate(BaseModel):
@@ -23,6 +25,8 @@ class ProjectUpdate(BaseModel):
     target_customer: str | None = None
     current_problem: str | None = None
     status: ProjectStatus | None = None
+    planned_investment: str | None = Field(default=None, max_length=80)
+    decision_deadline: str | None = Field(default=None, max_length=40)
 
 
 class ProjectOut(BaseModel):
@@ -40,5 +44,7 @@ class ProjectOut(BaseModel):
     # 聚合计数（实时统计，非冗余列）
     report_count: int = 0
     last_diagnosed_at: datetime | None = None
+    planned_investment: str | None = None
+    decision_deadline: str | None = None
 
     model_config = {"from_attributes": True}
