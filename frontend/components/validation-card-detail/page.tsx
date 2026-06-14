@@ -173,7 +173,7 @@ export function ValidationCardDetailPage({ cardId }: { cardId: string }) {
     try {
       const updated = await validationCardApi.submitReview(card.id, payload);
       setCard(updated);
-      setSaving({ key: "review", message: "第 7 天复盘已提交" });
+      setSaving({ key: "review", message: "第 7 天复盘已提交，已沉淀到经营档案与决策病例库" });
     } catch (e) {
       setSaving({ key: "review", message: e instanceof ApiError ? e.message : "复盘提交失败" });
     }
@@ -283,6 +283,7 @@ export function ValidationCardDetailPage({ cardId }: { cardId: string }) {
             </SideCard>
 
             <ReviewPanel card={card} saving={saving} onSubmit={submitReview} />
+            {card.result && <DepositDestinationCard card={card} />}
 
             <SideCard title="验证材料">
               <MaterialNote label="项目摘要" value={card.project_summary} />
@@ -999,9 +1000,57 @@ function ReadOnlyCaseSummary({ card }: { card: ValidationCard }) {
         <CaseSummaryRow label="复盘时间" value={card.validated_at ? formatTime(card.validated_at) : "未记录"} />
       </div>
       <p className="mt-4 text-[11px] font-semibold text-slate-400">
-        此验证卡已提交复盘，以上结论为只读记录。如需修改请在工作台操作。
+        此验证卡已提交复盘，结论已进入经营档案与决策病例库，后续同项目推演会读取这次验证结果。
       </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <a
+          href="/portfolio"
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white px-3 text-[12px] font-black text-brand shadow-sm hover:bg-[#f7f5ff]"
+        >
+          <Icon name="archive" className="h-3.5 w-3.5" />
+          经营档案
+        </a>
+        <a
+          href={`/bach/${card.id}`}
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white px-3 text-[12px] font-black text-orange-600 shadow-sm hover:bg-orange-50"
+        >
+          <Icon name="swords" className="h-3.5 w-3.5" />
+          BACH 复盘轨迹
+        </a>
+      </div>
     </section>
+  );
+}
+
+function DepositDestinationCard({ card }: { card: ValidationCard }) {
+  return (
+    <SideCard title="沉淀去向">
+      <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-3">
+        <div className="flex items-center gap-1.5 text-[12px] font-black text-emerald-700">
+          <Icon name="check-circle" className="h-3.5 w-3.5" />
+          已形成经营记忆
+        </div>
+        <p className="mt-2 text-[12px] font-semibold leading-5 text-slate-600">
+          复盘结论、失败模式、证据等级和 BACH 预测评分会作为同项目后续推演的历史上下文。
+        </p>
+      </div>
+      <div className="mt-3 grid gap-2">
+        <a
+          href="/portfolio"
+          className="flex h-9 items-center justify-between rounded-xl bg-[#f0edff] px-3 text-[12px] font-black text-brand hover:bg-[#e8e4ff]"
+        >
+          查看经营档案 / 病例库
+          <Icon name="chevron-right" className="h-3.5 w-3.5" />
+        </a>
+        <a
+          href={`/bach/${card.id}`}
+          className="flex h-9 items-center justify-between rounded-xl border border-line bg-white px-3 text-[12px] font-black text-[#172452] hover:text-brand"
+        >
+          查看 BACH 预测评分
+          <Icon name="chevron-right" className="h-3.5 w-3.5" />
+        </a>
+      </div>
+    </SideCard>
   );
 }
 
@@ -1092,7 +1141,8 @@ function ReviewPanel({
   const [channelQuotes, setChannelQuotes] = useState("");
   const [actualOutcome, setActualOutcome] = useState(card.actual_outcome || "");
   const [learnings, setLearnings] = useState(card.learnings || "");
-  const isSaving = saving?.key === "review";
+  const reviewMessage = saving?.key === "review" ? saving.message : null;
+  const isSaving = saving?.key === "review" && !saving.message;
 
   async function submit() {
     if (!decision) return;
@@ -1137,7 +1187,9 @@ function ReviewPanel({
         <CompactTextarea value={learnings} onChange={setLearnings} placeholder="复盘学习与下次修正" />
       </div>
       <div className="mt-3 flex items-center justify-between gap-2">
-        <span className="text-[11px] font-semibold text-slate-400">{isSaving && saving?.message}</span>
+        <span className={cn("text-[11px] font-semibold", reviewMessage?.includes("失败") ? "text-rose-500" : "text-slate-400")}>
+          {reviewMessage}
+        </span>
         <button
           type="button"
           onClick={submit}
@@ -1148,9 +1200,6 @@ function ReviewPanel({
           提交复盘
         </button>
       </div>
-      {saving?.key === "review" && saving.message && !isSaving && (
-        <div className="mt-2 text-[11px] font-bold text-slate-400">{saving.message}</div>
-      )}
     </SideCard>
   );
 }

@@ -144,7 +144,7 @@ export function PortfolioPage() {
       title: card.title,
       meta: `验证卡 · ${fmtTime(card.updated_at)}`,
       icon: "clipboard-check",
-      href: "#",
+      href: `/validation-cards/${card.id}`,
     }));
     return [...reportItems, ...cardItems]
       .sort((a, b) => b.meta.localeCompare(a.meta))
@@ -442,7 +442,7 @@ function ValidationFeedbackCard({ card, onSaved }: { card: ValidationCard; onSav
         actual_outcome: actualOutcome.trim(),
         learnings: learnings.trim(),
       });
-      setMessage("已完成第7天复盘");
+      setMessage("已完成第7天复盘，已沉淀到经营档案与病例库");
       await onSaved();
     } catch (error) {
       setMessage(error instanceof ApiError ? error.message : "回填失败");
@@ -536,6 +536,24 @@ function ValidationFeedbackCard({ card, onSaved }: { card: ValidationCard; onSav
           提交复盘
         </button>
       </div>
+      {card.result && (
+        <div className="mt-3 flex flex-wrap gap-2 border-t border-white/70 pt-3">
+          <a
+            href={`/validation-cards/${card.id}`}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white px-2.5 text-[11px] font-black text-brand hover:bg-[#f0edff]"
+          >
+            完整验证卡
+            <Icon name="chevron-right" className="h-3.5 w-3.5" />
+          </a>
+          <a
+            href={`/bach/${card.id}`}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white px-2.5 text-[11px] font-black text-orange-600 hover:bg-orange-50"
+          >
+            BACH 评分
+            <Icon name="chevron-right" className="h-3.5 w-3.5" />
+          </a>
+        </div>
+      )}
     </div>
   );
 }
@@ -548,7 +566,10 @@ function DecisionCaseCard({ item }: { item: DecisionCase }) {
         ? "bg-rose-50 text-rose-500"
         : "bg-orange-50 text-orange-500";
   return (
-    <div className="rounded-2xl border border-line bg-white p-4">
+    <a
+      href={`/validation-cards/${item.validation_card_id}`}
+      className="block rounded-2xl border border-line bg-white p-4 transition-colors hover:border-brand/30"
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="truncate text-[13px] font-black text-[#172452]">{item.title}</div>
@@ -569,7 +590,7 @@ function DecisionCaseCard({ item }: { item: DecisionCase }) {
           </span>
         ))}
       </div>
-    </div>
+    </a>
   );
 }
 
