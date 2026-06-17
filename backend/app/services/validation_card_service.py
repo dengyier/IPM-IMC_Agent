@@ -189,6 +189,8 @@ def update_action(
         action["progress"] = payload.progress
     if payload.evidence_count is not None:
         action["evidence_count"] = payload.evidence_count
+    if payload.evidence_target is not None:
+        action["evidence_target"] = payload.evidence_target
     if payload.owner is not None:
         action["owner"] = payload.owner
     if payload.due_at is not None:

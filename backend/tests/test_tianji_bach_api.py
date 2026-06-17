@@ -314,6 +314,32 @@ def test_validation_action_evidence_item_metadata_flows_to_bach_ledger():
     assert record.review_detail["validation_evidence"]["attachment_name"] == "访谈截图.png"
 
 
+def test_validation_action_patch_updates_evidence_target():
+    db = _db()
+    user = _user(db)
+    card = validation_card_service.create_card(
+        db,
+        user,
+        ValidationCardCreate(
+            title="是否投入30万启动GEO服务产品化",
+            project_description="计划投入30万，面向中小企业主提供GEO服务产品化。",
+            target_customer="中小企业主",
+        ),
+        llm=None,
+    )
+
+    updated = validation_card_service.update_action(
+        db,
+        card,
+        0,
+        ValidationActionPatch(evidence_target=6),
+        llm=None,
+    )
+
+    assert updated.actions[0]["evidence_target"] == 6
+    assert updated.status == "running"
+
+
 def test_validation_card_fallback_generates_decision_tree_from_decision_problem():
     db = _db()
     user = _user(db)

@@ -80,6 +80,7 @@ export function ValidationCardDetailPage({ cardId }: { cardId: string }) {
   }, [cardId]);
 
   const actions = card?.actions ?? [];
+  const currentDrawerAction = drawerIndex >= 0 ? actions[drawerIndex] ?? drawerAction : drawerAction;
   const evidenceTotals = useMemo(() => actionEvidenceTotals(actions), [actions]);
   const completedCount = useMemo(() => actions.filter((item) => item.status === "done").length, [actions]);
   const currentDay = useMemo(() => inferCurrentDay(card, actions), [card, actions]);
@@ -155,6 +156,19 @@ export function ValidationCardDetailPage({ cardId }: { cardId: string }) {
       setSaving({ key: `done-${actionIndex}`, message: "节点已完成" });
     } catch (e) {
       setSaving({ key: `done-${actionIndex}`, message: e instanceof ApiError ? e.message : "节点更新失败" });
+    }
+  }
+
+  async function updateEvidenceTarget(actionIndex: number, evidenceTarget: number) {
+    if (!card) return;
+    const normalizedTarget = Math.max(1, Math.min(99, Math.round(evidenceTarget)));
+    setSaving({ key: `target-${actionIndex}`, message: null });
+    try {
+      const updated = await validationCardApi.updateAction(card.id, actionIndex, { evidence_target: normalizedTarget });
+      setCard(updated);
+      setSaving({ key: `target-${actionIndex}`, message: "证据目标已更新" });
+    } catch (e) {
+      setSaving({ key: `target-${actionIndex}`, message: e instanceof ApiError ? e.message : "证据目标更新失败" });
     }
   }
 
@@ -254,6 +268,7 @@ export function ValidationCardDetailPage({ cardId }: { cardId: string }) {
               groupedActions={groupedActions}
               onAddEvidence={addEvidence}
               onMarkDone={markDone}
+              onUpdateEvidenceTarget={updateEvidenceTarget}
               uploadingFile={uploadingFile}
               onFileUpload={handleFileUpload}
               onOpenDrawer={(action, index) => { setDrawerAction(action); setDrawerIndex(index); }}
@@ -295,15 +310,16 @@ export function ValidationCardDetailPage({ cardId }: { cardId: string }) {
       ) : null}
 
       {/* P1-3: Node detail drawer */}
-      {drawerAction && (
+      {currentDrawerAction && (
         <NodeDetailDrawer
-          action={drawerAction}
+          action={currentDrawerAction}
           index={drawerIndex}
           cardId={card?.id ?? ""}
           saving={saving}
           onClose={() => { setDrawerAction(null); setDrawerIndex(-1); }}
           onAddEvidence={addEvidence}
           onMarkDone={markDone}
+          onUpdateEvidenceTarget={updateEvidenceTarget}
           uploadingFile={uploadingFile}
           onFileUpload={handleFileUpload}
         />
@@ -394,6 +410,7 @@ function DecisionTree({
   groupedActions,
   onAddEvidence,
   onMarkDone,
+  onUpdateEvidenceTarget,
   uploadingFile,
   onFileUpload,
   onOpenDrawer,
@@ -408,6 +425,7 @@ function DecisionTree({
   groupedActions: [number, ValidationAction[]][] | null;
   onAddEvidence: (actionIndex: number, text: string, grade?: string | null, sourceType?: string | null, attachmentUrl?: string | null, attachmentName?: string | null) => Promise<void>;
   onMarkDone: (index: number) => Promise<void>;
+  onUpdateEvidenceTarget: (actionIndex: number, evidenceTarget: number) => Promise<void>;
   uploadingFile: number | null;
   onFileUpload: (actionIndex: number, file: File) => Promise<{ url: string; name: string } | null>;
   onOpenDrawer: (action: ValidationAction, index: number) => void;
@@ -517,6 +535,7 @@ function DecisionTree({
                       saving={saving}
                       onAddEvidence={onAddEvidence}
                       onMarkDone={onMarkDone}
+                      onUpdateEvidenceTarget={onUpdateEvidenceTarget}
                       uploadingFile={uploadingFile}
                       onFileUpload={onFileUpload}
                       onOpenDrawer={() => onOpenDrawer(action, realIndex < 0 ? actions.indexOf(action) : realIndex)}
@@ -541,6 +560,7 @@ function DecisionTree({
                 saving={saving}
                 onAddEvidence={onAddEvidence}
                 onMarkDone={onMarkDone}
+                onUpdateEvidenceTarget={onUpdateEvidenceTarget}
                 uploadingFile={uploadingFile}
                 onFileUpload={onFileUpload}
                 onOpenDrawer={() => onOpenDrawer(action, realIndex < 0 ? actions.indexOf(action) : realIndex)}
@@ -560,6 +580,7 @@ function TreeNode({
   saving,
   onAddEvidence,
   onMarkDone,
+  onUpdateEvidenceTarget,
   uploadingFile,
   onFileUpload,
   onOpenDrawer,
@@ -570,6 +591,7 @@ function TreeNode({
   saving: SaveState | null;
   onAddEvidence: (actionIndex: number, text: string, grade?: string | null, sourceType?: string | null, attachmentUrl?: string | null, attachmentName?: string | null) => Promise<void>;
   onMarkDone: (index: number) => Promise<void>;
+  onUpdateEvidenceTarget: (actionIndex: number, evidenceTarget: number) => Promise<void>;
   uploadingFile: number | null;
   onFileUpload: (actionIndex: number, file: File) => Promise<{ url: string; name: string } | null>;
   onOpenDrawer: () => void;
@@ -667,6 +689,12 @@ function TreeNode({
           <div className={cn("mt-2 text-[11px] font-bold", missing ? "text-orange-500" : "text-emerald-600")}>
             {missing ? `缺 ${missing} 条有效证据` : "证据已满足最低要求"}
           </div>
+          <EvidenceTargetControl
+            index={index}
+            target={target}
+            saving={saving}
+            onUpdateTarget={onUpdateEvidenceTarget}
+          />
           <div className="mt-3 flex gap-2">
             <button
               type="button"
@@ -759,6 +787,7 @@ function NodeDetailDrawer({
   onClose,
   onAddEvidence,
   onMarkDone,
+  onUpdateEvidenceTarget,
   uploadingFile,
   onFileUpload,
 }: {
@@ -769,6 +798,7 @@ function NodeDetailDrawer({
   onClose: () => void;
   onAddEvidence: (actionIndex: number, text: string, grade?: string | null, sourceType?: string | null, attachmentUrl?: string | null, attachmentName?: string | null) => Promise<void>;
   onMarkDone: (index: number) => Promise<void>;
+  onUpdateEvidenceTarget: (actionIndex: number, evidenceTarget: number) => Promise<void>;
   uploadingFile: number | null;
   onFileUpload: (actionIndex: number, file: File) => Promise<{ url: string; name: string } | null>;
 }) {
@@ -881,10 +911,17 @@ function NodeDetailDrawer({
                 </span>
               </div>
             </div>
+            <EvidenceTargetControl
+              index={index}
+              target={target}
+              saving={saving}
+              onUpdateTarget={onUpdateEvidenceTarget}
+              compact
+            />
 
             {/* Existing evidence items */}
             {action.evidence_items && action.evidence_items.length > 0 ? (
-              <div className="mb-4 space-y-2">
+              <div className="mb-4 mt-3 space-y-2">
                 {action.evidence_items.map((item, eiIndex) => (
                   <div key={`dr-ei-${eiIndex}`} className="rounded-xl bg-slate-50 px-3 py-2">
                     <div className="text-[12px] font-semibold leading-5 text-[#172452]">{item.text}</div>
@@ -981,6 +1018,62 @@ function DetailRow({ label, value, icon }: { label: string; value: string; icon:
         <div className="text-[11px] font-black text-slate-400">{label}</div>
         <div className="text-[13px] font-bold leading-5 text-[#172452]">{value || "待补充"}</div>
       </div>
+    </div>
+  );
+}
+
+function EvidenceTargetControl({
+  index,
+  target,
+  saving,
+  onUpdateTarget,
+  compact = false,
+}: {
+  index: number;
+  target: number;
+  saving: SaveState | null;
+  onUpdateTarget: (actionIndex: number, evidenceTarget: number) => Promise<void>;
+  compact?: boolean;
+}) {
+  const [value, setValue] = useState(String(target));
+  const isSaving = saving?.key === `target-${index}`;
+
+  useEffect(() => {
+    setValue(String(target));
+  }, [target]);
+
+  const parsed = Number.parseInt(value, 10);
+  const normalized = Number.isFinite(parsed) ? Math.max(1, Math.min(99, parsed)) : target;
+  const changed = normalized !== target;
+
+  async function saveTarget() {
+    if (!changed || isSaving) return;
+    await onUpdateTarget(index, normalized);
+  }
+
+  return (
+    <div className={cn("flex items-center gap-2", compact ? "mb-3" : "mt-3")}>
+      <label className="shrink-0 text-[11px] font-black text-slate-400">目标</label>
+      <input
+        type="number"
+        min={1}
+        max={99}
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        onBlur={() => setValue(String(normalized))}
+        className="h-8 w-16 rounded-lg border border-line bg-white px-2 text-center text-[12px] font-black text-[#172452] outline-none focus:border-brand/50"
+        aria-label="证据目标条数"
+      />
+      <span className="text-[11px] font-bold text-slate-400">条证据</span>
+      <button
+        type="button"
+        onClick={saveTarget}
+        disabled={!changed || isSaving}
+        className="ml-auto flex h-8 items-center gap-1 rounded-lg bg-white px-2 text-[11px] font-black text-brand shadow-sm disabled:text-slate-300 disabled:shadow-none"
+      >
+        {isSaving && <Icon name="refresh" className="h-3 w-3 animate-spin" />}
+        保存
+      </button>
     </div>
   );
 }

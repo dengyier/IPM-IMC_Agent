@@ -818,7 +818,7 @@ export const validationCardApi = {
     id: string,
     actionIndex: number,
     payload: Partial<
-      Pick<ValidationAction, "status" | "progress" | "evidence_count" | "owner" | "due_at" | "completed_at">
+      Pick<ValidationAction, "status" | "progress" | "evidence_count" | "evidence_target" | "owner" | "due_at" | "completed_at">
     > & { evidence_note?: string; evidence_item?: ValidationEvidenceItem }
   ) => api.patch<ValidationCard>(`/api/validation-cards/${id}/actions/${actionIndex}`, payload),
   uploadAttachment: (id: string, file: File) => {

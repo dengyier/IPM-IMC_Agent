@@ -60,6 +60,7 @@ class ValidationActionPatch(BaseModel):
     status: ValidationActionStatus | None = None
     progress: int | None = Field(default=None, ge=0, le=100)
     evidence_count: int | None = Field(default=None, ge=0)
+    evidence_target: int | None = Field(default=None, ge=1)
     evidence_note: str | None = Field(default=None, max_length=2000)
     evidence_item: ValidationEvidenceItem | None = None
     owner: str | None = None
