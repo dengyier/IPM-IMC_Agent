@@ -414,6 +414,9 @@ def _failure_reason(text: str) -> str:
 
 
 def _actions(text: str) -> list[dict]:
+    if _is_opc_community_partnership(text):
+        return _opc_community_actions(text)
+
     subject = _decision_subject(text)
     customer = _target_customer_from_text(text)
     investment = _extract_investment(text) or "下一阶段投入"
@@ -620,6 +623,176 @@ def _actions(text: str) -> list[dict]:
             grounded_on=f"{subject}当前不具备扩大投入条件假设",
             target="决策人和项目执行负责人",
             baseline="当前没有暂停条件和重新启动条件。",
+            owner="决策人",
+            day_range="6-7天",
+            day=7,
+        ),
+    ]
+
+
+def _is_opc_community_partnership(text: str) -> bool:
+    lowered = text.lower()
+    return (
+        "opc" in lowered
+        and any(key in text for key in ["社区", "社群", "共同体"])
+        and any(key in text for key in ["合作", "共建", "一起", "一同", "创享", "产城"])
+    )
+
+
+def _opc_community_actions(text: str) -> list[dict]:
+    partner = "创享产城" if "创享产城" in text else "合作方"
+    investment = _extract_investment(text) or "首轮投入"
+    return [
+        _tree_node(
+            "n1",
+            None,
+            "root",
+            "",
+            title="盘点合作资源",
+            objective=f"确认{partner}与我方分别能为OPC社区注入哪些真实资源。",
+            steps=[
+                f"列出{partner}可提供的场地、企业资源、渠道、政策或活动能力",
+                "列出我方可提供的AI经营、GEO、OPC方法论、社群运营和交付能力",
+                "把每类资源标注为已掌握、需确认、不可控三类",
+            ],
+            success_metric=f"拿到{partner}确认的合作资源清单，至少包含3类可调用资源和对应负责人。",
+            grounded_on=f"{partner}与我方资源互补，足以支撑OPC社区冷启动假设",
+            target=f"{partner}负责人、我方项目负责人、可调用资源清单",
+            baseline="当前只有合作意向，尚未确认双方真实可调用资源。",
+            owner="项目负责人",
+            day_range="1天",
+            day=1,
+        ),
+        _tree_node(
+            "n2",
+            "n1",
+            "evidence",
+            f"若{partner}能给出可调用资源",
+            title="确认角色分工",
+            objective="明确双方在获客、内容、活动、交付、转化和复盘中的责任边界。",
+            steps=[
+                "画出社区从招募、入群、诊断、共创、转化到复盘的流程",
+                f"逐项标注{partner}负责、我方负责、共同负责和暂不做的事项",
+                "写出每项责任的交付物、响应时间和失败兜底方式",
+            ],
+            success_metric="形成一页角色分工表，至少覆盖6个关键环节，并得到双方口头或书面确认。",
+            grounded_on="合作不是泛泛背书，而是可执行角色分工假设",
+            target=f"{partner}决策人、我方执行负责人、社区运营流程",
+            baseline="当前缺少双方投入边界，容易把合作变成单方消耗。",
+            day_range="1-2天",
+            day=2,
+        ),
+        _tree_node(
+            "n3",
+            "n2",
+            "evidence",
+            "若双方角色分工可执行",
+            title="验证社区供给",
+            objective="验证OPC社区是否有足够高质量的内容、服务和共创议题供给。",
+            steps=[
+                "设计3个首批共创议题，如AI经营、GEO获客、超级个体商业闭环",
+                "为每个议题准备可交付样例、主持人和产出模板",
+                "邀请3-5位潜在成员评估议题价值和参与意愿",
+            ],
+            success_metric="至少3个共创议题被潜在成员认为值得参加，且能产出可复用经营资产。",
+            grounded_on="OPC社区的核心价值来自高质量供给，而不只是建群假设",
+            target="首批共创议题、主持人、样例产出、潜在OPC成员",
+            baseline="当前还没有被目标成员验证过的社区供给清单。",
+            day_range="2-3天",
+            day=3,
+        ),
+        _tree_node(
+            "n4",
+            "n3",
+            "evidence",
+            "若社区供给被认可",
+            title="测试首批承诺",
+            objective="验证首批OPC超级个体是否愿意付出时间、材料或费用进入共创。",
+            steps=[
+                "向10位目标成员发出明确邀请，说明共创主题、时间、产出和成员责任",
+                "要求对方做出至少一种承诺：报名、提交材料、预约诊断、支付小额费用",
+                "记录承诺类型、拒绝理由和最想获得的社区收益",
+            ],
+            success_metric="至少5位OPC目标成员给出可记录承诺，其中至少2位愿意提交材料或支付小额费用。",
+            grounded_on="OPC目标成员愿意用真实行动加入社区共创假设",
+            target="10位OPC超级个体或中小企业主",
+            baseline="当前只有我方对社区价值的判断，没有成员承诺证据。",
+            day_range="3-4天",
+            day=4,
+        ),
+        _tree_node(
+            "n5",
+            "n4",
+            "branch",
+            "若首批成员承诺不足",
+            title="重切价值主张",
+            objective="判断问题是成员不需要社区，还是价值主张、门槛或信任入口不对。",
+            steps=[
+                "把拒绝原因分为时间成本、价值不清、信任不足、价格门槛和身份不匹配",
+                f"分别测试我方邀请、{partner}背书邀请和成员转介绍三种入口",
+                "重写一版社区承诺：成员加入后7天内能得到什么具体经营收益",
+            ],
+            success_metric="找到1个承诺率明显更高的入口或价值表达，否则进入暂停/缩小范围判断。",
+            grounded_on="社区冷启动失败可能来自入口和价值表达错配假设",
+            target="拒绝成员、不同邀请入口、重写后的社区价值主张",
+            baseline="当前不知道承诺不足是需求弱还是信任与表达问题。",
+            day_range="4-5天",
+            day=5,
+        ),
+        _tree_node(
+            "n6",
+            "n4",
+            "synthesis",
+            "若首批成员承诺成立",
+            title="验证信任迁移",
+            objective=f"验证{partner}的场景、渠道或品牌信任能否迁移到OPC社区。",
+            steps=[
+                f"分别统计来自{partner}入口、我方入口、成员转介绍入口的响应率",
+                "比较不同入口成员的承诺质量、出席率和材料提交率",
+                "找出最适合冷启动的信任入口和转化话术",
+            ],
+            success_metric=f"{partner}或成员转介绍入口带来至少3位高承诺成员，且承诺质量高于泛邀请。",
+            grounded_on=f"{partner}资源能转化为社区信任与参与，而不只是名义合作假设",
+            target=f"{partner}渠道、我方私域、成员转介绍三类入口",
+            baseline="当前不知道哪种入口能带来高质量OPC成员。",
+            day_range="4-5天",
+            day=5,
+        ),
+        _tree_node(
+            "n7",
+            "n6",
+            "synthesis",
+            "若信任入口可复用",
+            title="明确治理与收益",
+            objective="确认社区治理、成员权益、收益分配和内容资产归属是否能长期运行。",
+            steps=[
+                "写出成员准入、活动规则、资料使用、共创资产归属和退出机制",
+                f"和{partner}确认线索、成交、活动、赞助或服务收入的收益分配方式",
+                "列出3条必须提前约定的合作红线",
+            ],
+            success_metric="形成一页社区治理与收益分配草案，双方确认无重大分歧。",
+            grounded_on="社区不是一次活动，而是有治理边界和收益规则的经营系统假设",
+            target=f"{partner}决策人、我方决策人、首批成员权益说明",
+            baseline="当前缺少治理边界与收益分配，后续容易因资源和成果归属产生冲突。",
+            day_range="5-6天",
+            day=6,
+        ),
+        _tree_node(
+            "n8",
+            "n7",
+            "synthesis",
+            "若治理与收益规则可接受",
+            title="测算投入上限",
+            objective=f"判断{investment}是否能支撑首轮OPC社区验证，并设定继续、缩小或暂停条件。",
+            steps=[
+                "测算首轮活动、内容、运营、交付、人力和获客成本",
+                "估算可转化收入、服务机会、GEO项目线索和社区资产复用价值",
+                "写出继续投入、缩小试点、暂停合作三种决策线",
+            ],
+            success_metric=f"形成{investment}以内的首轮预算表，并明确继续、缩小试点或暂停合作的证据阈值。",
+            grounded_on="OPC社区合作能在有限投入内形成可复用经营资产和商业回报假设",
+            target="预算表、运营成本、潜在收入、继续/暂停阈值",
+            baseline=f"当前只有{investment}意向，没有首轮预算、投入上限和停止线。",
             owner="决策人",
             day_range="6-7天",
             day=7,

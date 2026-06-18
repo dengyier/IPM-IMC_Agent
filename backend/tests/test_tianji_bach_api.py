@@ -371,6 +371,42 @@ def test_validation_card_fallback_generates_decision_tree_from_decision_problem(
     assert any(action["branch_condition"] for action in card.actions[1:])
 
 
+def test_validation_card_fallback_generates_opc_community_partnership_tree():
+    db = _db()
+    user = _user(db)
+
+    card = validation_card_service.create_card(
+        db,
+        user,
+        ValidationCardCreate(
+            title="我准备和创享产城一同合作打造OPC社区",
+            project_description="我准备和创享产城一同合作打造OPC社区，计划投入5万，先判断这个合作是否值得推进。",
+            target_customer="OPC超级个体、中小企业主",
+        ),
+        llm=None,
+    )
+
+    combined = "\n".join(
+        f"{action['title']} {action['objective']} {action['success_metric']} {action['grounded_on']} {action['target']} {action['baseline']}"
+        for action in card.actions
+    )
+
+    assert len(card.actions) >= 8
+    assert card.actions[0]["node_type"] == "root"
+    assert card.actions[0]["parent_id"] is None
+    assert "创享产城" in combined
+    assert "合作资源" in combined
+    assert "角色分工" in combined
+    assert "社区供给" in combined
+    assert "OPC" in combined
+    assert "治理" in combined
+    assert "收益分配" in combined
+    assert "暂停" in combined
+    assert "客户痛点" not in combined
+    assert "付费承诺" not in combined
+    assert any(action["branch_condition"] for action in card.actions[1:])
+
+
 def test_validation_card_llm_decision_tree_is_preferred_over_flat_actions():
     db = _db()
     user = _user(db)

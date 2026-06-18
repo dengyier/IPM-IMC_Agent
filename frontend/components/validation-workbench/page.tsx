@@ -1019,6 +1019,10 @@ function dimensionLabel(value: string): string {
     delivery: "交付",
     competition: "竞争",
     compliance: "合规",
+    partner_fit: "合作资源",
+    community_supply: "社区供给",
+    trust_transfer: "信任迁移",
+    governance: "治理",
   }[value] || value;
 }
 

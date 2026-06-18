@@ -49,6 +49,27 @@ def test_fallback_hypotheses_cover_required_dimensions():
     assert len(bach.generate_hypotheses(db, card, llm=None)) == len(rows)
 
 
+def test_fallback_hypotheses_cover_opc_partnership_dimensions():
+    db = _db()
+    card = ValidationCard(
+        title="我准备和创享产城一同合作打造OPC社区",
+        project_summary="我准备和创享产城一同合作打造OPC社区，计划投入5万。",
+        tenant_id="t1",
+        target_customer="OPC超级个体、中小企业主",
+    )
+    db.add(card)
+    db.flush()
+
+    rows = bach.generate_hypotheses(db, card, llm=None)
+    dimensions = {row.dimension for row in rows}
+    statements = "\n".join(row.statement for row in rows)
+
+    assert {"partner_fit", "community_supply", "governance", "unit_economics"} <= dimensions
+    assert "创享产城" in statements
+    assert "OPC" in statements
+    assert "治理" in statements or "收益分配" in statements
+
+
 def test_grade_cap_clamps_llm_overclaim():
     db = _db()
     card = _card(db)
