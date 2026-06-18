@@ -740,6 +740,13 @@ export interface ValidationAction {
   progress: number;
   evidence_count: number;
   evidence_target: number;
+  evidence_grade: "A" | "B" | "C" | "D" | string;
+  dependencies: string[];
+  unlocks: string[];
+  failure_branch?: string | null;
+  parallelizable: boolean;
+  priority_score: number;
+  kill_if_failed: boolean;
   evidence_items?: ValidationEvidenceItem[];
   due_at?: string | null;
   completed_at?: string | null;
@@ -907,6 +914,13 @@ export interface WorkbenchAction {
   evidence_count: number;
   evidence_target: number;
   missing_evidence_count: number;
+  evidence_grade: "A" | "B" | "C" | "D" | string;
+  dependencies: string[];
+  unlocks: string[];
+  failure_branch?: string | null;
+  parallelizable: boolean;
+  priority_score: number;
+  kill_if_failed: boolean;
   evidence_items: ValidationEvidenceItem[];
 }
 

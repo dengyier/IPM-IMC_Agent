@@ -44,6 +44,13 @@ class WorkbenchAction(BaseModel):
     evidence_count: int = 0
     evidence_target: int = 3
     missing_evidence_count: int = 0
+    evidence_grade: str = "C"
+    dependencies: list[str] = Field(default_factory=list)
+    unlocks: list[str] = Field(default_factory=list)
+    failure_branch: str | None = None
+    parallelizable: bool = False
+    priority_score: int = 50
+    kill_if_failed: bool = False
     evidence_items: list[dict] = Field(default_factory=list)
 
 

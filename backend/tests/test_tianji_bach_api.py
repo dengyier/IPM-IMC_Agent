@@ -371,7 +371,7 @@ def test_validation_card_fallback_generates_decision_tree_from_decision_problem(
     assert any(action["branch_condition"] for action in card.actions[1:])
 
 
-def test_validation_card_fallback_generates_opc_community_partnership_tree():
+def test_validation_card_fallback_generates_opc_community_nonlinear_evidence_graph():
     db = _db()
     user = _user(db)
 
@@ -391,7 +391,7 @@ def test_validation_card_fallback_generates_opc_community_partnership_tree():
         for action in card.actions
     )
 
-    assert len(card.actions) >= 8
+    assert len(card.actions) >= 14
     assert card.actions[0]["node_type"] == "root"
     assert card.actions[0]["parent_id"] is None
     assert "创享产城" in combined
@@ -405,6 +405,14 @@ def test_validation_card_fallback_generates_opc_community_partnership_tree():
     assert "客户痛点" not in combined
     assert "付费承诺" not in combined
     assert any(action["branch_condition"] for action in card.actions[1:])
+    assert any(action.get("parallelizable") for action in card.actions)
+    assert any(action.get("kill_if_failed") for action in card.actions)
+    assert any(action.get("failure_branch") for action in card.actions)
+    assert any(action.get("unlocks") for action in card.actions)
+    assert all(action.get("evidence_grade") in {"A", "B", "C", "D"} for action in card.actions)
+    assert all(isinstance(action.get("priority_score"), int) for action in card.actions)
+    assert all(isinstance(action.get("dependencies"), list) for action in card.actions)
+    assert any("n2" in action.get("dependencies", []) and action.get("parallelizable") for action in card.actions)
 
 
 def test_validation_card_llm_decision_tree_is_preferred_over_flat_actions():

@@ -51,6 +51,13 @@ class ValidationAction(BaseModel):
     progress: int = Field(default=0, ge=0, le=100)
     evidence_count: int = Field(default=0, ge=0)
     evidence_target: int = Field(default=3, ge=1)
+    evidence_grade: ValidationEvidenceGrade = "C"
+    dependencies: list[str] = Field(default_factory=list)
+    unlocks: list[str] = Field(default_factory=list)
+    failure_branch: str | None = None
+    parallelizable: bool = False
+    priority_score: int = Field(default=50, ge=0, le=100)
+    kill_if_failed: bool = False
     evidence_items: list[ValidationEvidenceItem] = Field(default_factory=list)
     due_at: datetime | None = None
     completed_at: datetime | None = None

@@ -185,6 +185,17 @@ def _actions(card: ValidationCard | None) -> list[WorkbenchAction]:
                 evidence_count=evidence_count,
                 evidence_target=evidence_target,
                 missing_evidence_count=max(0, evidence_target - evidence_count),
+                evidence_grade=str(item.get("evidence_grade") or "C"),
+                dependencies=[str(value) for value in item.get("dependencies", []) if str(value).strip()]
+                if isinstance(item.get("dependencies"), list)
+                else [],
+                unlocks=[str(value) for value in item.get("unlocks", []) if str(value).strip()]
+                if isinstance(item.get("unlocks"), list)
+                else [],
+                failure_branch=str(item.get("failure_branch")) if item.get("failure_branch") else None,
+                parallelizable=bool(item.get("parallelizable")),
+                priority_score=max(0, min(_int(item.get("priority_score"), 50), 100)),
+                kill_if_failed=bool(item.get("kill_if_failed")),
                 evidence_items=evidence_items,
             )
         )

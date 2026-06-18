@@ -17,16 +17,7 @@ type ActionFilter = "all" | "todo" | "running" | "done" | "blocked";
 
 type DayGrouping = "flat" | "by-day";
 
-const dayLabels = [
-  "提交任务",
-  "生成验证卡",
-  "客户访谈",
-  "渠道测试",
-  "付费意向",
-  "单位经济",
-  "证据汇总",
-  "复盘决策",
-];
+const dayLabels = ["提交任务", "生成验证卡", "证据关口", "证据关口", "证据关口", "证据关口", "证据汇总", "复盘决策"];
 
 const gradeLabels: Record<string, string> = { A: "A 级 — 强证据", B: "B 级 — 中证据", C: "C 级 — 弱证据", D: "D 级 — 参考" };
 const gradeShortLabels: Record<string, string> = { A: "A", B: "B", C: "C", D: "D" };
@@ -365,17 +356,34 @@ function TaskHero({
 }
 
 function DayTimeline({ currentDay, actions }: { currentDay: number; actions: ValidationAction[] }) {
+  const byDay = useMemo(() => {
+    const map = new Map<number, ValidationAction[]>();
+    actions.forEach((action) => {
+      const day = actionDay(action);
+      map.set(day, [...(map.get(day) ?? []), action]);
+    });
+    map.forEach((items, day) => {
+      map.set(day, [...items].sort((a, b) => (b.priority_score || 0) - (a.priority_score || 0)));
+    });
+    return map;
+  }, [actions]);
+
   return (
     <section className="dashboard-card rounded-2xl px-5 py-5">
       <div className="mb-4 flex items-center justify-between gap-4">
-        <h2 className="text-[17px] font-black text-ink">7 天验证路径</h2>
-        <span className="text-[12px] font-bold text-slate-400">每天推进一个证据关口</span>
+        <h2 className="text-[17px] font-black text-ink">7 天证据推进</h2>
+        <span className="text-[12px] font-bold text-slate-400">每天攻克当前最关键证据关口</span>
       </div>
       <div className="relative grid grid-cols-8 gap-2">
         <div className="absolute left-8 right-8 top-[17px] h-px bg-line" />
-        {dayLabels.map((label, day) => {
+        {dayLabels.map((fallbackLabel, day) => {
           const state = day < currentDay ? "done" : day === currentDay ? "active" : "todo";
-          const count = actions.filter((item) => actionDay(item) === day).length;
+          const dayActions = byDay.get(day) ?? [];
+          const count = dayActions.length;
+          const lead = dayActions[0];
+          const parallelCount = dayActions.filter((item) => item.parallelizable).length;
+          const killCount = dayActions.filter((item) => item.kill_if_failed).length;
+          const label = lead?.title || fallbackLabel;
           return (
             <div key={label} className="relative z-10 flex min-w-0 flex-col items-center text-center">
               <div
@@ -391,6 +399,12 @@ function DayTimeline({ currentDay, actions }: { currentDay: number; actions: Val
               <div className={cn("mt-2 text-[12px] font-black", state === "active" ? "text-brand" : "text-[#172452]")}>Day {day}</div>
               <div className="mt-1 min-h-[28px] text-[11px] font-semibold leading-4 text-slate-500">{label}</div>
               {count > 0 && <div className="mt-1 rounded-md bg-slate-50 px-1.5 py-0.5 text-[10px] font-bold text-slate-400">{count} 节点</div>}
+              {(parallelCount > 0 || killCount > 0) && (
+                <div className="mt-1 flex flex-wrap justify-center gap-1">
+                  {parallelCount > 0 && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-black text-emerald-600">并行 {parallelCount}</span>}
+                  {killCount > 0 && <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[9px] font-black text-rose-500">否决 {killCount}</span>}
+                </div>
+              )}
             </div>
           );
         })}
@@ -656,6 +670,12 @@ function TreeNode({
               {actionStatusLabel(action.status)}
             </span>
             {action.day_range && <span className="rounded-lg bg-slate-50 px-2 py-1 text-[11px] font-bold text-slate-500">{action.day_range}</span>}
+            <span className={cn("rounded-lg border px-1.5 py-0.5 text-[10px] font-black", gradeTones[action.evidence_grade] || gradeTones.C)}>
+              需 {gradeShortLabels[action.evidence_grade] || action.evidence_grade || "C"} 级
+            </span>
+            {action.parallelizable && <span className="rounded-lg bg-emerald-50 px-2 py-1 text-[11px] font-black text-emerald-600">可并行</span>}
+            {action.kill_if_failed && <span className="rounded-lg bg-rose-50 px-2 py-1 text-[11px] font-black text-rose-500">一票否决</span>}
+            {action.priority_score >= 85 && <span className="rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-black text-amber-600">高优先级 {action.priority_score}</span>}
             {bestEvidenceGrade(action) && gradeShortLabels[bestEvidenceGrade(action)!] && (
               <span className={cn("rounded-lg border px-1.5 py-0.5 text-[10px] font-black", gradeTones[bestEvidenceGrade(action)!] || "bg-slate-50 text-slate-500 border-slate-200")}>
                 证据 {gradeShortLabels[bestEvidenceGrade(action)!]}
@@ -675,6 +695,9 @@ function TreeNode({
             <InfoLine label="验证对象" value={action.target || "待补充"} />
             <InfoLine label="基线" value={action.baseline || "待补充"} />
             <InfoLine label="负责人" value={action.owner || "未设置"} />
+            {action.dependencies?.length > 0 && <InfoLine label="依赖节点" value={action.dependencies.join("、")} />}
+            {action.unlocks?.length > 0 && <InfoLine label="解锁节点" value={action.unlocks.join("、")} />}
+            {action.failure_branch && <InfoLine label="失败跳转" value={action.failure_branch} />}
           </div>
         </div>
 
@@ -867,6 +890,12 @@ function NodeDetailDrawer({
               {actionStatusLabel(action.status)}
             </span>
             {action.day_range && <span className="rounded-lg bg-slate-50 px-2 py-1 text-[11px] font-bold text-slate-500">{action.day_range}</span>}
+            <span className={cn("rounded-lg border px-1.5 py-0.5 text-[10px] font-black", gradeTones[action.evidence_grade] || gradeTones.C)}>
+              需要 {gradeShortLabels[action.evidence_grade] || action.evidence_grade || "C"} 级证据
+            </span>
+            {action.parallelizable && <span className="rounded-lg bg-emerald-50 px-2 py-1 text-[11px] font-black text-emerald-600">可并行</span>}
+            {action.kill_if_failed && <span className="rounded-lg bg-rose-50 px-2 py-1 text-[11px] font-black text-rose-500">一票否决</span>}
+            <span className="rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-black text-amber-600">优先级 {action.priority_score}</span>
           </div>
 
           {action.branch_condition && (
@@ -885,6 +914,9 @@ function NodeDetailDrawer({
             <DetailRow label="基线" value={action.baseline || "待补充"} icon="activity" />
             <DetailRow label="负责人" value={action.owner || "未设置"} icon="user" />
             <DetailRow label="预计时间" value={action.day_range} icon="clock" />
+            {action.dependencies?.length > 0 && <DetailRow label="依赖节点" value={action.dependencies.join("、")} icon="route" />}
+            {action.unlocks?.length > 0 && <DetailRow label="解锁节点" value={action.unlocks.join("、")} icon="check-circle" />}
+            {action.failure_branch && <DetailRow label="失败跳转" value={action.failure_branch} icon="alert" />}
           </div>
 
           {action.steps?.length > 0 && (
