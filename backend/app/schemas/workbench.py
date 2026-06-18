@@ -83,6 +83,15 @@ class WorkbenchBachSnapshot(BaseModel):
     replay_consistent: bool = True
 
 
+class WorkbenchWorldModel(BaseModel):
+    player_role: str = "未设定"
+    main_quest: str = "尚未生成主线任务"
+    resource_gaps: list[str] = Field(default_factory=list)
+    active_rules: list[str] = Field(default_factory=list)
+    risk_signals: list[str] = Field(default_factory=list)
+    next_quests: list[str] = Field(default_factory=list)
+
+
 class WorkbenchSummary(BaseModel):
     has_data: bool
     current_project: WorkbenchProject | None = None
@@ -98,3 +107,4 @@ class WorkbenchSummary(BaseModel):
     evidence_status: WorkbenchEvidenceStatus
     case_assets: list[WorkbenchCaseAsset] = Field(default_factory=list)
     bach: WorkbenchBachSnapshot | None = None
+    world_model: WorkbenchWorldModel = Field(default_factory=WorkbenchWorldModel)

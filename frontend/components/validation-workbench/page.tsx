@@ -466,7 +466,10 @@ export function ValidationWorkbenchPage() {
           </section>
         ) : (
           <section className="mt-5 grid gap-5 xl:grid-cols-[1fr_260px]">
-            <div className="dashboard-card rounded-2xl px-5 py-5">
+            <div className="space-y-4">
+              <SituationPanel summary={summary} />
+
+              <div className="dashboard-card rounded-2xl px-5 py-5">
               <div className="flex items-start justify-between gap-5">
                 <div className="min-w-0">
                   <div className="text-[12px] font-black text-[#172452]">当前验证任务</div>
@@ -587,6 +590,7 @@ export function ValidationWorkbenchPage() {
                     <Icon name="chevron-right" className="h-3.5 w-3.5" />
                   </a>
                 </div>
+              </div>
               </div>
             </div>
 
@@ -792,6 +796,72 @@ function Timeline({ rows }: { rows: WorkbenchTimelineItem[] }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function SituationPanel({ summary }: { summary: WorkbenchSummary }) {
+  const model = summary.world_model;
+  return (
+    <section className="dashboard-card rounded-2xl px-5 py-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[12px] font-black text-brand">
+            <Icon name="route" className="h-4 w-4" />
+            当前局面
+          </div>
+          <h2 className="mt-2 truncate text-[19px] font-black tracking-[-0.02em] text-ink">{model.main_quest}</h2>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] font-bold text-slate-500">
+            <span className="inline-flex items-center gap-1.5 rounded-xl bg-[#f0edff] px-2.5 py-1 text-brand">
+              <Icon name="users" className="h-3.5 w-3.5" />
+              {model.player_role}
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-xl bg-slate-50 px-2.5 py-1 text-slate-600">
+              <Icon name="shield" className="h-3.5 w-3.5" />
+              {summary.cold_review.verdict}
+            </span>
+          </div>
+        </div>
+        <div className="grid min-w-[220px] grid-cols-3 gap-2 text-center">
+          <SituationMetric label="证据" value={`${summary.evidence_status.existing}`} tone="text-emerald-600" />
+          <SituationMetric label="缺口" value={`${summary.evidence_status.missing}`} tone="text-orange-500" />
+          <SituationMetric label="Day" value={`${summary.current_day}/${summary.total_days}`} tone="text-brand" />
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 xl:grid-cols-4">
+        <SituationList icon="target" title="下一任务" items={model.next_quests} tone="text-brand" />
+        <SituationList icon="alert" title="资源缺口" items={model.resource_gaps} tone="text-orange-500" />
+        <SituationList icon="shield" title="当前规则" items={model.active_rules} tone="text-[#172452]" />
+        <SituationList icon="check-circle" title="风险信号" items={model.risk_signals} tone="text-rose-500" />
+      </div>
+    </section>
+  );
+}
+
+function SituationMetric({ label, value, tone }: { label: string; value: string; tone: string }) {
+  return (
+    <div className="rounded-xl bg-slate-50 px-3 py-2">
+      <div className={cn("text-[18px] font-black", tone)}>{value}</div>
+      <div className="mt-0.5 text-[11px] font-bold text-slate-400">{label}</div>
+    </div>
+  );
+}
+
+function SituationList({ icon, title, items, tone }: { icon: string; title: string; items: string[]; tone: string }) {
+  return (
+    <div className="rounded-2xl border border-line bg-white px-3 py-3">
+      <div className={cn("flex items-center gap-1.5 text-[12px] font-black", tone)}>
+        <Icon name={icon} className="h-3.5 w-3.5" />
+        {title}
+      </div>
+      <ul className="mt-2 space-y-1.5">
+        {(items.length ? items : ["暂无"]).slice(0, 3).map((item, index) => (
+          <li key={`${title}-${index}`} className="line-clamp-2 text-[11.5px] font-semibold leading-5 text-slate-500">
+            {item}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

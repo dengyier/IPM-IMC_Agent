@@ -23,6 +23,7 @@ from app.schemas.workbench import (
     WorkbenchProject,
     WorkbenchSummary,
     WorkbenchTimelineItem,
+    WorkbenchWorldModel,
 )
 
 
@@ -64,6 +65,7 @@ def get_summary(db: Session, user: AuthUser) -> WorkbenchSummary:
         evidence_status=evidence,
         case_assets=_case_assets(card),
         bach=_bach_snapshot(db, card),
+        world_model=_world_model(project, card, actions, evidence, cold_review),
     )
 
 
@@ -206,6 +208,95 @@ def _evidence_status(actions: list[WorkbenchAction]) -> WorkbenchEvidenceStatus:
     else:
         grade = "D"
     return WorkbenchEvidenceStatus(existing=existing, missing=missing, pending=pending, grade=grade)
+
+
+def _world_model(
+    project: Project | None,
+    card: ValidationCard | None,
+    actions: list[WorkbenchAction],
+    evidence: WorkbenchEvidenceStatus,
+    cold_review: WorkbenchColdReview,
+) -> WorkbenchWorldModel:
+    return WorkbenchWorldModel(
+        player_role=_player_role(project, card),
+        main_quest=_main_quest(project, card),
+        resource_gaps=_resource_gaps(actions, evidence),
+        active_rules=_active_rules(card, evidence),
+        risk_signals=_risk_signals(actions, evidence, cold_review),
+        next_quests=_next_quests(card, actions),
+    )
+
+
+def _player_role(project: Project | None, card: ValidationCard | None) -> str:
+    if project and project.target_customer:
+        return project.target_customer
+    if card and card.target_customer:
+        return card.target_customer
+    return "经营决策者"
+
+
+def _main_quest(project: Project | None, card: ValidationCard | None) -> str:
+    if card and card.title:
+        return card.title
+    if project and project.current_problem:
+        return project.current_problem
+    if project and project.name:
+        return f"验证「{project.name}」是否值得继续投入"
+    return "输入关键经营决策，生成7天验证主线"
+
+
+def _resource_gaps(actions: list[WorkbenchAction], evidence: WorkbenchEvidenceStatus) -> list[str]:
+    if not actions:
+        return ["缺少可验证的行动节点"]
+    gaps = [
+        f"「{action.title}」还缺 {action.missing_evidence_count} 条证据"
+        for action in actions
+        if action.missing_evidence_count > 0
+    ][:3]
+    if gaps:
+        return gaps
+    if evidence.grade in {"A", "B"}:
+        return ["证据资源基本够用，进入复盘判断"]
+    return ["证据资源不足，需要补充客户、渠道或付费信号"]
+
+
+def _active_rules(card: ValidationCard | None, evidence: WorkbenchEvidenceStatus) -> list[str]:
+    if not card:
+        return ["没有验证卡时，不能进入投入判断"]
+    return [
+        "7天验证周期内，只用真实证据推进判断",
+        f"当前证据等级为 {evidence.grade}，缺口为 {evidence.missing} 条",
+        "继续、调整或暂停必须回到验证卡结果沉淀",
+    ]
+
+
+def _risk_signals(
+    actions: list[WorkbenchAction],
+    evidence: WorkbenchEvidenceStatus,
+    cold_review: WorkbenchColdReview,
+) -> list[str]:
+    signals = [item for item in cold_review.reasons if item][:3]
+    if signals:
+        return signals
+    pending = [action.title for action in actions if action.status != "done"][:2]
+    if pending:
+        return [f"仍有未完成任务：{title}" for title in pending]
+    if evidence.missing > 0:
+        return [f"证据总缺口仍有 {evidence.missing} 条"]
+    return ["暂未发现新的高优先级风险信号"]
+
+
+def _next_quests(card: ValidationCard | None, actions: list[WorkbenchAction]) -> list[str]:
+    if not card:
+        return ["生成第一张7天验证卡"]
+    quests = [
+        f"完成「{action.title}」并补齐证据"
+        for action in actions
+        if action.status != "done"
+    ][:3]
+    if quests:
+        return quests
+    return ["进入第7天复盘，形成继续/调整/暂停决策"]
 
 
 def _bach_snapshot(db: Session, card: ValidationCard | None) -> WorkbenchBachSnapshot | None:

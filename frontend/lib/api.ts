@@ -946,6 +946,15 @@ export interface WorkbenchBachSnapshot {
   replay_consistent: boolean;
 }
 
+export interface WorkbenchWorldModel {
+  player_role: string;
+  main_quest: string;
+  resource_gaps: string[];
+  active_rules: string[];
+  risk_signals: string[];
+  next_quests: string[];
+}
+
 export interface WorkbenchSummary {
   has_data: boolean;
   current_project: WorkbenchProject | null;
@@ -961,6 +970,7 @@ export interface WorkbenchSummary {
   evidence_status: WorkbenchEvidenceStatus;
   case_assets: WorkbenchCaseAsset[];
   bach: WorkbenchBachSnapshot | null;
+  world_model: WorkbenchWorldModel;
 }
 
 export const workbenchApi = {
