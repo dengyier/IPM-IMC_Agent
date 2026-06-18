@@ -16,6 +16,7 @@ type ReviewDecision = "continue" | "adjust" | "pause" | "";
 type ActionFilter = "all" | "todo" | "running" | "done" | "blocked";
 
 type DayGrouping = "flat" | "by-day";
+type DetailView = "map" | "list" | "time";
 
 const dayLabels = ["提交任务", "生成验证卡", "证据关口", "证据关口", "证据关口", "证据关口", "证据汇总", "复盘决策"];
 
@@ -50,6 +51,7 @@ export function ValidationCardDetailPage({ cardId }: { cardId: string }) {
   const [filterStatus, setFilterStatus] = useState<ActionFilter>("all");
   // P1-2: day grouping toggle
   const [dayGrouping, setDayGrouping] = useState<DayGrouping>("flat");
+  const [activeView, setActiveView] = useState<DetailView>("map");
   // P1-3: detail drawer
   const [drawerAction, setDrawerAction] = useState<ValidationAction | null>(null);
   const [drawerIndex, setDrawerIndex] = useState<number>(-1);
@@ -86,16 +88,9 @@ export function ValidationCardDetailPage({ cardId }: { cardId: string }) {
   // P1-2: grouped actions by day
   const groupedActions = useMemo(() => {
     if (dayGrouping !== "by-day") return null;
-    const groups = new Map<number, ValidationAction[]>();
-    for (const action of filteredActions) {
-      const day = actionDay(action);
-      const existing = groups.get(day) || [];
-      existing.push(action);
-      groups.set(day, existing);
-    }
-    const sorted = Array.from(groups.entries()).sort(([a], [b]) => a - b);
-    return sorted;
+    return groupActionsByDay(filteredActions);
   }, [filteredActions, dayGrouping]);
+  const timeGroupedActions = useMemo(() => groupActionsByDay(filteredActions), [filteredActions]);
 
   // P1-6: evidence attachment upload
   const [uploadingFile, setUploadingFile] = useState<number | null>(null);
@@ -247,23 +242,53 @@ export function ValidationCardDetailPage({ cardId }: { cardId: string }) {
               completedCount={completedCount}
               evidenceTotals={evidenceTotals}
             />
-            <DayTimeline currentDay={currentDay} actions={actions} />
-            <DecisionTree
-              card={card}
-              saving={saving}
-              filterStatus={filterStatus}
-              onFilterChange={setFilterStatus}
-              dayGrouping={dayGrouping}
-              onDayGroupingChange={setDayGrouping}
-              filteredActions={filteredActions}
-              groupedActions={groupedActions}
-              onAddEvidence={addEvidence}
-              onMarkDone={markDone}
-              onUpdateEvidenceTarget={updateEvidenceTarget}
-              uploadingFile={uploadingFile}
-              onFileUpload={handleFileUpload}
-              onOpenDrawer={(action, index) => { setDrawerAction(action); setDrawerIndex(index); }}
-            />
+            <ViewTabs activeView={activeView} onChange={setActiveView} />
+            {activeView === "map" && (
+              <EvidenceMap
+                card={card}
+                actions={actions}
+                onOpenDrawer={(action, index) => { setDrawerAction(action); setDrawerIndex(index); }}
+              />
+            )}
+            {activeView === "list" && (
+              <DecisionTree
+                card={card}
+                saving={saving}
+                filterStatus={filterStatus}
+                onFilterChange={setFilterStatus}
+                dayGrouping={dayGrouping}
+                onDayGroupingChange={setDayGrouping}
+                filteredActions={filteredActions}
+                groupedActions={groupedActions}
+                onAddEvidence={addEvidence}
+                onMarkDone={markDone}
+                onUpdateEvidenceTarget={updateEvidenceTarget}
+                uploadingFile={uploadingFile}
+                onFileUpload={handleFileUpload}
+                onOpenDrawer={(action, index) => { setDrawerAction(action); setDrawerIndex(index); }}
+              />
+            )}
+            {activeView === "time" && (
+              <>
+                <DayTimeline currentDay={currentDay} actions={actions} />
+                <DecisionTree
+                  card={card}
+                  saving={saving}
+                  filterStatus={filterStatus}
+                  onFilterChange={setFilterStatus}
+                  dayGrouping="by-day"
+                  onDayGroupingChange={setDayGrouping}
+                  filteredActions={filteredActions}
+                  groupedActions={timeGroupedActions}
+                  onAddEvidence={addEvidence}
+                  onMarkDone={markDone}
+                  onUpdateEvidenceTarget={updateEvidenceTarget}
+                  uploadingFile={uploadingFile}
+                  onFileUpload={handleFileUpload}
+                  onOpenDrawer={(action, index) => { setDrawerAction(action); setDrawerIndex(index); }}
+                />
+              </>
+            )}
             {/* P1-8: Read-only case summary after review */}
             {card.result && (
               <ReadOnlyCaseSummary card={card} />
@@ -352,6 +377,188 @@ function TaskHero({
         <HeroMetric icon="activity" label="动作均值" value={`${completionRate}%`} />
       </div>
     </section>
+  );
+}
+
+function ViewTabs({ activeView, onChange }: { activeView: DetailView; onChange: (view: DetailView) => void }) {
+  const tabs: { key: DetailView; label: string; icon: string }[] = [
+    { key: "map", label: "证据图谱", icon: "route" },
+    { key: "list", label: "执行列表", icon: "list" },
+    { key: "time", label: "时间视图", icon: "calendar" },
+  ];
+  return (
+    <section className="dashboard-card rounded-2xl px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => onChange(tab.key)}
+            className={cn(
+              "flex h-10 items-center gap-2 rounded-xl px-3 text-[12px] font-black transition",
+              activeView === tab.key ? "bg-[#172452] text-white shadow-soft" : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+            )}
+          >
+            <Icon name={tab.icon} className="h-4 w-4" />
+            {tab.label}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function EvidenceMap({
+  card,
+  actions,
+  onOpenDrawer,
+}: {
+  card: ValidationCard;
+  actions: ValidationAction[];
+  onOpenDrawer: (action: ValidationAction, index: number) => void;
+}) {
+  const nodeIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    actions.forEach((action, index) => {
+      if (action.node_id) map.set(action.node_id, index);
+    });
+    return map;
+  }, [actions]);
+  const doneIds = useMemo(() => new Set(actions.filter((action) => action.status === "done").map((action) => action.node_id)), [actions]);
+  const levels = useMemo(() => {
+    const groups = new Map<number, ValidationAction[]>();
+    actions.forEach((action) => {
+      const level = Math.min(5, graphDepth(action, actions));
+      groups.set(level, [...(groups.get(level) ?? []), action]);
+    });
+    return Array.from(groups.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([level, items]) => [
+        level,
+        [...items].sort((a, b) => (b.priority_score || 0) - (a.priority_score || 0)),
+      ] as [number, ValidationAction[]]);
+  }, [actions]);
+  const active = useMemo(
+    () => [...actions].filter((action) => action.status !== "done").sort((a, b) => (b.priority_score || 0) - (a.priority_score || 0))[0],
+    [actions]
+  );
+  const blocked = actions.filter((action) => (action.dependencies ?? []).some((id) => !doneIds.has(id))).length;
+  const parallel = actions.filter((action) => action.parallelizable && action.status !== "done").length;
+  const kill = actions.filter((action) => action.kill_if_failed && action.status !== "done").length;
+
+  return (
+    <section className="dashboard-card overflow-hidden rounded-2xl">
+      <div className="border-b border-line px-5 py-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[12px] font-black text-brand">
+              <Icon name="route" className="h-4 w-4" />
+              证据图谱
+            </div>
+            <h2 className="mt-2 truncate text-[20px] font-black tracking-[-0.02em] text-ink">{card.title}</h2>
+            <p className="mt-1 text-[12px] font-semibold leading-5 text-slate-500">
+              节点按依赖关系展开；点击任意节点录入证据、查看失败跳转和解锁路径。
+            </p>
+          </div>
+          <div className="grid min-w-[320px] grid-cols-4 gap-2 text-center">
+            <MapMetric label="节点" value={`${actions.length}`} />
+            <MapMetric label="阻塞" value={`${blocked}`} tone={blocked ? "text-orange-500" : "text-emerald-600"} />
+            <MapMetric label="并行" value={`${parallel}`} tone="text-emerald-600" />
+            <MapMetric label="否决" value={`${kill}`} tone={kill ? "text-rose-500" : "text-slate-400"} />
+          </div>
+        </div>
+        {active && (
+          <button
+            type="button"
+            onClick={() => onOpenDrawer(active, nodeIndexMap.get(active.node_id) ?? actions.indexOf(active))}
+            className="mt-4 flex w-full items-center justify-between gap-3 rounded-2xl border border-brand/20 bg-[#f7f5ff] px-4 py-3 text-left hover:border-brand/40"
+          >
+            <span className="min-w-0">
+              <span className="block text-[11px] font-black text-brand">当前关键关口</span>
+              <span className="mt-1 block truncate text-[14px] font-black text-[#172452]">{active.title}</span>
+            </span>
+            <span className="shrink-0 rounded-xl bg-white px-3 py-1.5 text-[11px] font-black text-brand">优先级 {active.priority_score}</span>
+          </button>
+        )}
+      </div>
+
+      <div className="overflow-x-auto px-5 py-5">
+        <div className="grid min-w-[920px] gap-4" style={{ gridTemplateColumns: `repeat(${Math.max(levels.length, 1)}, minmax(220px, 1fr))` }}>
+          {levels.map(([level, items]) => (
+            <div key={level} className="min-w-0">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <span className="text-[12px] font-black text-[#172452]">{level === 0 ? "起点" : `第 ${level} 层`}</span>
+                <span className="rounded-lg bg-slate-50 px-2 py-1 text-[10px] font-bold text-slate-400">{items.length} 节点</span>
+              </div>
+              <div className="space-y-3">
+                {items.map((action) => {
+                  const index = nodeIndexMap.get(action.node_id) ?? actions.indexOf(action);
+                  return (
+                    <MapNodeCard
+                      key={`${action.node_id}-${action.title}`}
+                      action={action}
+                      blocked={(action.dependencies ?? []).some((id) => !doneIds.has(id))}
+                      onClick={() => onOpenDrawer(action, index)}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MapMetric({ label, value, tone = "text-brand" }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="rounded-xl bg-slate-50 px-3 py-2">
+      <div className={cn("text-[18px] font-black", tone)}>{value}</div>
+      <div className="mt-0.5 text-[11px] font-bold text-slate-400">{label}</div>
+    </div>
+  );
+}
+
+function MapNodeCard({ action, blocked, onClick }: { action: ValidationAction; blocked: boolean; onClick: () => void }) {
+  const count = Math.max(action.evidence_count ?? 0, action.evidence_items?.length ?? 0);
+  const target = Math.max(1, action.evidence_target || 3);
+  const missing = Math.max(0, target - count);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "w-full rounded-2xl border bg-white px-3 py-3 text-left shadow-[0_10px_24px_rgba(39,55,105,0.04)] transition hover:-translate-y-0.5 hover:shadow-md",
+        action.status === "done" && "border-emerald-100 bg-emerald-50/25",
+        action.kill_if_failed && action.status !== "done" && "border-rose-100",
+        blocked && action.status !== "done" && "border-orange-100"
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <span className="rounded-lg bg-[#f0edff] px-2 py-1 text-[10px] font-black text-brand">{action.node_id}</span>
+        <span className={cn("rounded-lg px-2 py-1 text-[10px] font-black", actionStatusTone(action.status))}>
+          {actionStatusLabel(action.status)}
+        </span>
+      </div>
+      <div className="mt-2 line-clamp-2 text-[13px] font-black leading-5 text-[#172452]">{action.title}</div>
+      <div className="mt-1 line-clamp-2 text-[11px] font-semibold leading-5 text-slate-500">{action.objective}</div>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        <span className={cn("rounded-lg border px-1.5 py-0.5 text-[10px] font-black", gradeTones[action.evidence_grade] || gradeTones.C)}>
+          {gradeShortLabels[action.evidence_grade] || action.evidence_grade || "C"} 级
+        </span>
+        <span className="rounded-lg bg-slate-50 px-1.5 py-0.5 text-[10px] font-black text-slate-500">{count}/{target} 证据</span>
+        {missing > 0 && <span className="rounded-lg bg-orange-50 px-1.5 py-0.5 text-[10px] font-black text-orange-500">缺 {missing}</span>}
+        {action.parallelizable && <span className="rounded-lg bg-emerald-50 px-1.5 py-0.5 text-[10px] font-black text-emerald-600">并行</span>}
+        {action.kill_if_failed && <span className="rounded-lg bg-rose-50 px-1.5 py-0.5 text-[10px] font-black text-rose-500">否决</span>}
+      </div>
+      {(action.dependencies?.length > 0 || action.unlocks?.length > 0) && (
+        <div className="mt-3 grid gap-1 text-[10px] font-bold leading-4 text-slate-400">
+          {action.dependencies?.length > 0 && <span>依赖：{action.dependencies.join("、")}</span>}
+          {action.unlocks?.length > 0 && <span>解锁：{action.unlocks.join("、")}</span>}
+        </div>
+      )}
+    </button>
   );
 }
 
@@ -1426,6 +1633,17 @@ function actionEvidenceTotals(actions: ValidationAction[]): EvidenceTotals {
   );
 }
 
+function groupActionsByDay(actions: ValidationAction[]): [number, ValidationAction[]][] {
+  const groups = new Map<number, ValidationAction[]>();
+  for (const action of actions) {
+    const day = actionDay(action);
+    groups.set(day, [...(groups.get(day) ?? []), action]);
+  }
+  return Array.from(groups.entries())
+    .map(([day, items]) => [day, [...items].sort((a, b) => (b.priority_score || 0) - (a.priority_score || 0))] as [number, ValidationAction[]])
+    .sort(([a], [b]) => a - b);
+}
+
 function inferCurrentDay(card: ValidationCard | null, actions: ValidationAction[]): number {
   const metaDay = card?.meta?.current_day;
   if (typeof metaDay === "number" && Number.isFinite(metaDay)) return Math.min(7, Math.max(0, metaDay));
@@ -1434,6 +1652,24 @@ function inferCurrentDay(card: ValidationCard | null, actions: ValidationAction[
   const firstTodo = actions.find((action) => action.status !== "done");
   if (firstTodo) return Math.min(7, Math.max(1, actionDay(firstTodo)));
   return actions.length ? 7 : 0;
+}
+
+function graphDepth(action: ValidationAction, actions: ValidationAction[]): number {
+  const byId = new Map(actions.map((item) => [item.node_id, item]));
+  const visited = new Set<string>();
+  function depthOf(node: ValidationAction): number {
+    if (!node.node_id || visited.has(node.node_id)) return 0;
+    visited.add(node.node_id);
+    const parents = [...(node.dependencies ?? [])];
+    if (node.parent_id) parents.push(node.parent_id);
+    const parentDepths = parents
+      .map((id) => byId.get(id))
+      .filter((item): item is ValidationAction => Boolean(item))
+      .map((parent) => depthOf(parent) + 1);
+    visited.delete(node.node_id);
+    return parentDepths.length ? Math.max(...parentDepths) : 0;
+  }
+  return depthOf(action);
 }
 
 function actionDay(action: ValidationAction): number {
