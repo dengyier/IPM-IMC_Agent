@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 ValidationStatus = Literal["draft", "running", "completed", "archived"]
 ValidationResult = Literal["achieved", "not_achieved", "partially_achieved"]
@@ -61,6 +61,13 @@ class ValidationAction(BaseModel):
     evidence_items: list[ValidationEvidenceItem] = Field(default_factory=list)
     due_at: datetime | None = None
     completed_at: datetime | None = None
+
+    @field_validator("parent_id", mode="before")
+    @classmethod
+    def normalize_parent_id(cls, value):
+        if value is None or value == "":
+            return None
+        return str(value)
 
 
 class ValidationActionPatch(BaseModel):

@@ -11,8 +11,6 @@ type SaveState = {
   message: string | null;
 };
 
-type ReviewDecision = "continue" | "adjust" | "pause" | "";
-
 type ActionFilter = "all" | "todo" | "running" | "done" | "blocked";
 
 type DayGrouping = "flat" | "by-day";
@@ -158,27 +156,6 @@ export function ValidationCardDetailPage({ cardId }: { cardId: string }) {
     }
   }
 
-  async function submitReview(payload: {
-    final_decision: "continue" | "adjust" | "pause";
-    interview_count: number;
-    paid_intent_count: number;
-    rejection_reasons: string[];
-    channel_quotes: string[];
-    estimated_cac: string;
-    actual_outcome: string;
-    learnings: string;
-  }) {
-    if (!card) return;
-    setSaving({ key: "review", message: null });
-    try {
-      const updated = await validationCardApi.submitReview(card.id, payload);
-      setCard(updated);
-      setSaving({ key: "review", message: "第 7 天复盘已提交，已沉淀到经营档案与决策病例库" });
-    } catch (e) {
-      setSaving({ key: "review", message: e instanceof ApiError ? e.message : "复盘提交失败" });
-    }
-  }
-
   return (
     <main className="min-w-0 flex-1 overflow-y-auto px-8 py-6">
       <header className="flex items-start justify-between gap-6">
@@ -293,19 +270,10 @@ export function ValidationCardDetailPage({ cardId }: { cardId: string }) {
             {card.result && (
               <ReadOnlyCaseSummary card={card} />
             )}
-            <EvidenceSection actions={actions} />
           </section>
 
           <aside className="space-y-4">
-            <SideCard title="任务进度">
-              <Metric label="决策树节点" value={`${actions.length} 个`} />
-              <Metric label="已完成节点" value={`${completedCount} 个`} tone="text-emerald-600" />
-              <Metric label="有效证据" value={`${evidenceTotals.current} / ${evidenceTotals.target} 条`} />
-              <Metric label="缺失证据" value={`${evidenceTotals.missing} 条`} tone={evidenceTotals.missing ? "text-orange-600" : "text-emerald-600"} />
-              <div className="mt-3 h-2 rounded-full bg-slate-100">
-                <div className="h-2 rounded-full bg-brand transition-all" style={{ width: `${completionRate}%` }} />
-              </div>
-            </SideCard>
+            <EvidenceSection actions={actions} />
 
             <SideCard title="继续/调整/暂停标准">
               <Criteria label="继续" value={card.decision_criteria?.continue_when} />
@@ -313,7 +281,6 @@ export function ValidationCardDetailPage({ cardId }: { cardId: string }) {
               <Criteria label="暂停" value={card.decision_criteria?.pause_when} />
             </SideCard>
 
-            <ReviewPanel card={card} saving={saving} onSubmit={submitReview} />
             {card.result && <DepositDestinationCard card={card} />}
 
             <SideCard title="验证材料">
@@ -1400,25 +1367,28 @@ function EvidenceSection({ actions }: { actions: ValidationAction[] }) {
     (action.evidence_items ?? []).map((item, index) => ({ action, actionIndex, item, index }))
   );
   return (
-    <section id="evidence" className="dashboard-card rounded-2xl px-5 py-5">
+    <section id="evidence" className="dashboard-card rounded-2xl px-4 py-4">
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-[17px] font-black text-ink">证据中心</h2>
+        <h2 className="text-[15px] font-black text-ink">证据中心</h2>
         <span className="text-[12px] font-bold text-slate-400">{rows.length} 条证据</span>
       </div>
       {rows.length === 0 ? (
-        <div className="rounded-2xl bg-slate-50 px-4 py-8 text-center text-[13px] font-bold text-slate-400">
+        <div className="rounded-2xl bg-slate-50 px-4 py-8 text-center text-[12px] font-bold leading-5 text-slate-400">
           暂无证据记录。先在上方任一节点录入访谈、付费、渠道或成本证据。
         </div>
       ) : (
-        <div className="divide-y divide-line">
+        <div className="space-y-2">
           {rows.map(({ action, item, actionIndex, index }) => (
-            <div key={`${action.node_id || actionIndex}-${index}`} className="grid gap-3 py-3 md:grid-cols-[200px_1fr_100px]">
-              <div>
-                <div className="text-[11px] font-black text-brand">节点 {actionIndex + 1}</div>
-                <div className="mt-1 line-clamp-2 text-[12px] font-black leading-5 text-[#172452]">{action.title}</div>
+            <div key={`${action.node_id || actionIndex}-${index}`} className="rounded-2xl border border-line bg-white px-3 py-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-black text-brand">节点 {actionIndex + 1}</div>
+                  <div className="mt-1 line-clamp-2 text-[12px] font-black leading-5 text-[#172452]">{action.title}</div>
+                </div>
+                <div className="shrink-0 text-[10px] font-semibold text-slate-400">{item.created_at ? formatTime(item.created_at) : ""}</div>
               </div>
-              <div>
-                <div className="rounded-xl bg-slate-50 px-3 py-2 text-[13px] font-bold leading-6 text-[#172452]">{item.text}</div>
+              <div className="mt-2">
+                <div className="rounded-xl bg-slate-50 px-3 py-2 text-[12px] font-bold leading-5 text-[#172452]">{item.text}</div>
                 {item.grade && (
                   <div className="mt-1 flex flex-wrap gap-1">
                     <span className={cn("inline-block rounded-md border px-1.5 py-0.5 text-[10px] font-black", gradeTones[item.grade] || "")}>
@@ -1438,101 +1408,11 @@ function EvidenceSection({ actions }: { actions: ValidationAction[] }) {
                   </div>
                 )}
               </div>
-              <div className="text-right text-[11px] font-semibold text-slate-400">{item.created_at ? formatTime(item.created_at) : ""}</div>
             </div>
           ))}
         </div>
       )}
     </section>
-  );
-}
-
-function ReviewPanel({
-  card,
-  saving,
-  onSubmit,
-}: {
-  card: ValidationCard;
-  saving: SaveState | null;
-  onSubmit: (payload: {
-    final_decision: "continue" | "adjust" | "pause";
-    interview_count: number;
-    paid_intent_count: number;
-    rejection_reasons: string[];
-    channel_quotes: string[];
-    estimated_cac: string;
-    actual_outcome: string;
-    learnings: string;
-  }) => Promise<void>;
-}) {
-  const [decision, setDecision] = useState<ReviewDecision>(resultToDecision(card.result));
-  const [interviewCount, setInterviewCount] = useState("");
-  const [paidIntentCount, setPaidIntentCount] = useState("");
-  const [estimatedCac, setEstimatedCac] = useState("");
-  const [rejectionReasons, setRejectionReasons] = useState("");
-  const [channelQuotes, setChannelQuotes] = useState("");
-  const [actualOutcome, setActualOutcome] = useState(card.actual_outcome || "");
-  const [learnings, setLearnings] = useState(card.learnings || "");
-  const reviewMessage = saving?.key === "review" ? saving.message : null;
-  const isSaving = saving?.key === "review" && !saving.message;
-
-  async function submit() {
-    if (!decision) return;
-    await onSubmit({
-      final_decision: decision,
-      interview_count: toNumber(interviewCount),
-      paid_intent_count: toNumber(paidIntentCount),
-      rejection_reasons: splitList(rejectionReasons),
-      channel_quotes: splitList(channelQuotes),
-      estimated_cac: estimatedCac.trim(),
-      actual_outcome: actualOutcome.trim(),
-      learnings: learnings.trim(),
-    });
-  }
-
-  return (
-    <SideCard title="Day 7 复盘">
-      {card.result && (
-        <div className={cn("mb-3 rounded-xl px-3 py-2 text-[12px] font-black", resultTone(card.result))}>
-          当前结论：{resultLabel(card.result)}
-        </div>
-      )}
-      <div className="space-y-2">
-        <select
-          value={decision}
-          onChange={(event) => setDecision(event.target.value as ReviewDecision)}
-          className="h-10 w-full rounded-xl border border-line bg-white px-3 text-[12px] font-bold text-[#172452] outline-none focus:border-brand/50"
-        >
-          <option value="">选择最终决策</option>
-          <option value="continue">继续投入</option>
-          <option value="adjust">调整后再投入</option>
-          <option value="pause">暂停投入</option>
-        </select>
-        <div className="grid grid-cols-2 gap-2">
-          <CompactInput value={interviewCount} onChange={setInterviewCount} placeholder="访谈人数" />
-          <CompactInput value={paidIntentCount} onChange={setPaidIntentCount} placeholder="付费意向数" />
-        </div>
-        <CompactInput value={estimatedCac} onChange={setEstimatedCac} placeholder="预估 CAC / 成本" />
-        <CompactTextarea value={rejectionReasons} onChange={setRejectionReasons} placeholder="拒绝原因，用换行或逗号分隔" />
-        <CompactTextarea value={channelQuotes} onChange={setChannelQuotes} placeholder="渠道报价、合作条件、客户原话" />
-        <CompactTextarea value={actualOutcome} onChange={setActualOutcome} placeholder="实际验证结果" />
-        <CompactTextarea value={learnings} onChange={setLearnings} placeholder="复盘学习与下次修正" />
-      </div>
-      <div className="mt-3 flex items-center justify-between gap-2">
-        <span className={cn("text-[11px] font-semibold", reviewMessage?.includes("失败") ? "text-rose-500" : "text-slate-400")}>
-          {reviewMessage}
-        </span>
-        <button
-          type="button"
-          onClick={submit}
-          disabled={isSaving || !decision}
-          className="flex h-9 items-center gap-1.5 rounded-xl bg-brand px-3 text-[12px] font-black text-white disabled:opacity-50"
-        >
-          <Icon name={isSaving ? "refresh" : "check"} className={cn("h-3.5 w-3.5", isSaving && "animate-spin")} />
-          提交复盘
-        </button>
-      </div>
-    </SideCard>
   );
 }
 
@@ -1552,15 +1432,6 @@ function SideCard({ title, children }: { title: string; children: ReactNode }) {
       <h3 className="mb-3 text-[15px] font-black text-ink">{title}</h3>
       {children}
     </section>
-  );
-}
-
-function Metric({ label, value, tone = "text-[#172452]" }: { label: string; value: string; tone?: string }) {
-  return (
-    <div className="flex items-center justify-between py-1.5 text-[12px] font-bold">
-      <span className="text-slate-500">{label}</span>
-      <span className={tone}>{value}</span>
-    </div>
   );
 }
 
@@ -1588,28 +1459,6 @@ function InfoLine({ label, value }: { label: string; value?: string }) {
       <span className="text-slate-400">{label}：</span>
       <span>{value || "待补充"}</span>
     </div>
-  );
-}
-
-function CompactInput({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
-  return (
-    <input
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      className="h-9 w-full rounded-xl border border-line bg-white px-3 text-[12px] font-semibold text-[#172452] outline-none placeholder:text-slate-400 focus:border-brand/50"
-      placeholder={placeholder}
-    />
-  );
-}
-
-function CompactTextarea({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
-  return (
-    <textarea
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      className="min-h-[58px] w-full resize-none rounded-xl border border-line bg-white px-3 py-2 text-[12px] font-semibold leading-5 text-[#172452] outline-none placeholder:text-slate-400 focus:border-brand/50"
-      placeholder={placeholder}
-    />
   );
 }
 
@@ -1810,24 +1659,6 @@ function resultTone(value?: string | null): string {
   return "bg-slate-100 text-slate-500";
 }
 
-function resultToDecision(value?: ValidationCard["result"]): ReviewDecision {
-  if (value === "achieved") return "continue";
-  if (value === "not_achieved") return "pause";
-  if (value === "partially_achieved") return "adjust";
-  return "";
-}
-
-function splitList(value: string) {
-  return value
-    .split(/[\n,，;；]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function toNumber(value: string) {
-  const n = Number(value);
-  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
-}
 
 function formatTime(value: string): string {
   const date = new Date(value);

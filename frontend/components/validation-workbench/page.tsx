@@ -11,6 +11,7 @@ import {
   workbenchApi,
   type AssistantDepositFileResult,
   type AssistantParseFileResult,
+  type ValidationCard,
   type WorkbenchSummary,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -43,10 +44,19 @@ type WorkbenchMaterial = {
   imageNote?: string;
 };
 
+type PendingValidationTask = {
+  title: string;
+  plannedInvestment: string;
+  decisionDeadline: string;
+  targetCustomer: string;
+};
+
 export function ValidationWorkbenchPage() {
   const [summary, setSummary] = useState<WorkbenchSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [pendingTask, setPendingTask] = useState<PendingValidationTask | null>(null);
+  const [validationCards, setValidationCards] = useState<ValidationCard[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [plannedInvestment, setPlannedInvestment] = useState("");
@@ -62,10 +72,21 @@ export function ValidationWorkbenchPage() {
     setLoading(true);
     setError(null);
     try {
-      setSummary(await workbenchApi.summary());
-    } catch (e) {
-      setSummary(null);
-      setError(e instanceof ApiError ? e.message : "验证工作台加载失败，请检查后端服务");
+      const [summaryResult, cardsResult] = await Promise.allSettled([
+        workbenchApi.summary(),
+        validationCardApi.list(),
+      ]);
+      if (summaryResult.status === "fulfilled") {
+        setSummary(summaryResult.value);
+      } else {
+        setSummary(null);
+        setError(summaryResult.reason instanceof ApiError ? summaryResult.reason.message : "验证工作台加载失败，请检查后端服务");
+      }
+      if (cardsResult.status === "fulfilled") {
+        setValidationCards(cardsResult.value);
+      } else if (summaryResult.status === "fulfilled") {
+        setError(cardsResult.reason instanceof ApiError ? cardsResult.reason.message : "验证任务列表加载失败");
+      }
     } finally {
       setLoading(false);
     }
@@ -76,7 +97,7 @@ export function ValidationWorkbenchPage() {
   }, []);
 
   const project = summary?.current_project ?? null;
-  const hasTask = Boolean(summary?.has_data && summary.current_card_id);
+  const hasCards = validationCards.length > 0;
   const readyMaterials = materials.filter((item) => ["ready", "image_ready", "deposited"].includes(item.status));
   const hasStructuredFacts =
     plannedInvestment.trim().length > 0 || decisionDeadline.length > 0 || targetCustomer.trim().length > 0;
@@ -85,22 +106,30 @@ export function ValidationWorkbenchPage() {
   async function startValidation() {
     const text = buildValidationBrief();
     if (!text || saving || uploadingMaterial) return;
+    const taskTitle = (draft.trim() || readyMaterials[0]?.filename || text).slice(0, 48);
+    setPendingTask({
+      title: taskTitle,
+      plannedInvestment: plannedInvestment.trim(),
+      decisionDeadline,
+      targetCustomer: targetCustomer.trim(),
+    });
     setSaving(true);
     setError(null);
     try {
       const createdProject = await projectApi.create({
-        name: (draft.trim() || readyMaterials[0]?.filename || text).slice(0, 48),
+        name: taskTitle,
         target_customer: targetCustomer.trim(),
         current_problem: text,
         task_pack: "new_project",
         planned_investment: plannedInvestment.trim() || null,
         decision_deadline: decisionDeadline || null,
       });
-      await validationCardApi.create({
+      const createdCard = await validationCardApi.create({
         project_id: createdProject.id,
-        title: (draft.trim() || readyMaterials[0]?.filename || text).slice(0, 48),
+        title: taskTitle,
         project_description: text,
       });
+      setValidationCards((prev) => [createdCard, ...prev.filter((card) => card.id !== createdCard.id)]);
       setDraft("");
       setPlannedInvestment("");
       setDecisionDeadline("");
@@ -112,6 +141,7 @@ export function ValidationWorkbenchPage() {
       setError(e instanceof ApiError ? e.message : "创建7天验证任务失败");
     } finally {
       setSaving(false);
+      setPendingTask(null);
     }
   }
 
@@ -249,11 +279,6 @@ export function ValidationWorkbenchPage() {
     params.set("validationCardId", summary.current_card_id);
     return `/chat?${params.toString()}`;
   })();
-  const focusInterviewHref = (() => {
-    const href = new URL(aiInterviewHref, "http://local");
-    href.searchParams.set("focus", "1");
-    return `${href.pathname}${href.search}`;
-  })();
 
   return (
     <main className="flex min-w-0 flex-1 overflow-hidden">
@@ -264,19 +289,6 @@ export function ValidationWorkbenchPage() {
             <p className="mt-1.5 text-[13px] font-medium text-slate-500">
               把一个模糊商业决策，拆成7天可执行、可复盘的验证任务。
             </p>
-          </div>
-          <div className="flex items-center gap-3 text-[#172452]">
-            <a href="/data-center" className="flex h-10 w-10 items-center justify-center rounded-xl hover:bg-white">
-              <Icon name="folder" className="h-5 w-5" />
-            </a>
-            <a href={focusInterviewHref} className="flex h-10 items-center gap-2 rounded-xl px-3 text-[13px] font-bold hover:bg-white">
-              <Icon name="panel" className="h-5 w-5" />
-              专注
-            </a>
-            <a href={aiInterviewHref} className="flex h-10 items-center gap-2 rounded-xl px-3 text-[13px] font-bold text-brand hover:bg-white">
-              <Icon name="history" className="h-5 w-5" />
-              会话
-            </a>
           </div>
         </header>
 
@@ -415,7 +427,12 @@ export function ValidationWorkbenchPage() {
               正在加载验证任务...
             </div>
           </section>
-        ) : !hasTask || !summary ? (
+        ) : saving && pendingTask ? (
+          <ValidationCardsWorkspace
+            cards={validationCards}
+            pendingTask={pendingTask}
+          />
+        ) : !hasCards ? (
           <section className="dashboard-card mt-5 rounded-2xl px-6 py-10 text-center">
             <Icon name="target" className="mx-auto h-10 w-10 text-brand/40" />
             <h2 className="mt-4 text-[18px] font-black text-ink">还没有进行中的验证任务</h2>
@@ -426,64 +443,9 @@ export function ValidationWorkbenchPage() {
           </section>
         ) : (
           <section className="mt-5 space-y-4">
-            <SituationPanel summary={summary} />
-
-            <div className="grid gap-4 lg:grid-cols-2">
-              <SidePanel title="当前项目">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-[15px] font-black text-ink">{project?.name}</div>
-                    <div className="mt-2 text-[12px] font-semibold leading-5 text-slate-500">
-                      计划投入：{project?.planned_investment || "未设置"}
-                    </div>
-                  </div>
-                  <span className={cn("rounded-lg px-2 py-1 text-[11px] font-black", statusBadge.tone)}>{statusBadge.label}</span>
-                </div>
-                <a href={summary.current_card_id ? `/validation-cards/${summary.current_card_id}` : "/portfolio"} className="mt-4 inline-flex items-center gap-1.5 text-[12px] font-black text-brand">
-                  进入任务详情
-                  <Icon name="chevron-right" className="h-3.5 w-3.5" />
-                </a>
-              </SidePanel>
-
-              <SidePanel title="下一步推荐">
-                <p className="text-[13px] font-bold leading-6 text-[#172452]">{summary.next_action}</p>
-                <a href={aiInterviewHref} className="mt-4 flex h-10 items-center justify-center rounded-xl border border-brand/25 bg-white text-[12px] font-black text-brand hover:bg-[#f7f5ff]">
-                  去 AI 经营访谈
-                </a>
-              </SidePanel>
-
-              <SidePanel
-                title="证据状态"
-                action={summary.evidence_updated_at ? `更新于 ${formatTime(summary.evidence_updated_at)}` : undefined}
-              >
-                <EvidenceRow dot="bg-emerald-500" label="已有证据" value={`${summary.evidence_status.existing} 条`} />
-                <EvidenceRow dot="bg-orange-500" label="缺失证据" value={`${summary.evidence_status.missing} 条`} />
-                <EvidenceRow dot="bg-slate-300" label="待完成动作" value={`${summary.evidence_status.pending} 个`} />
-                <p className="mt-2 rounded-lg bg-orange-50 px-3 py-2 text-[11px] font-semibold leading-5 text-orange-600">
-                  缺失证据按每个决策树节点的最低证据目标汇总；进入任务详情可展开证据图谱继续补齐。
-                </p>
-                <a href={summary.current_card_id ? `/validation-cards/${summary.current_card_id}#evidence` : "/portfolio"} className="mt-4 inline-flex items-center gap-1.5 text-[12px] font-black text-brand">
-                  查看证据中心
-                  <Icon name="chevron-right" className="h-3.5 w-3.5" />
-                </a>
-              </SidePanel>
-
-              {summary.bach && <BachPanel snapshot={summary.bach} />}
-            </div>
-
-            <SidePanel title="沉淀为病例">
-              <p className="text-[12px] font-semibold leading-5 text-slate-500">
-                Day7 复盘完成后，将自动进入经营档案与决策病例库。
-              </p>
-              <div className="mt-4 grid grid-cols-3 gap-2">
-                {summary.case_assets.map((asset) => (
-                  <div key={asset.label} className="rounded-2xl bg-slate-50 px-2 py-3 text-center">
-                    <Icon name={asset.status === "ready" ? "check-circle" : "archive"} className="mx-auto h-5 w-5 text-brand" />
-                    <div className="mt-2 text-[11px] font-black text-[#172452]">{asset.label}</div>
-                  </div>
-                ))}
-              </div>
-            </SidePanel>
+            <ValidationCardsWorkspace
+              cards={validationCards}
+            />
           </section>
         )}
 
@@ -493,6 +455,119 @@ export function ValidationWorkbenchPage() {
       </section>
     </main>
   );
+}
+
+function ValidationCardsWorkspace({
+  cards,
+  pendingTask,
+}: {
+  cards: ValidationCard[];
+  pendingTask?: PendingValidationTask | null;
+}) {
+  return (
+    <section className="dashboard-card rounded-2xl px-5 py-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-[17px] font-black text-ink">验证任务卡片</h2>
+          <p className="mt-1 text-[12px] font-semibold text-slate-400">可以创建多张验证卡；点击卡片后再查看该卡详情。</p>
+        </div>
+        <span className="rounded-xl bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-500">
+          {cards.length + (pendingTask ? 1 : 0)} 张
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-3 xl:grid-cols-3">
+        {pendingTask && <PendingValidationTaskTile task={pendingTask} />}
+        {cards.map((card) => (
+          <ValidationTaskTile
+            key={card.id}
+            card={card}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PendingValidationTaskTile({ task }: { task: PendingValidationTask }) {
+  const facts = [
+    task.plannedInvestment ? `计划投入：${task.plannedInvestment}` : "计划投入待确认",
+    task.decisionDeadline ? `决策期限：${task.decisionDeadline}` : "期限待确认",
+    task.targetCustomer ? `目标客户：${task.targetCustomer}` : "目标客户待确认",
+  ];
+
+  return (
+    <div className="rounded-2xl border border-brand/20 bg-[#f8f7ff] px-4 py-4 shadow-[0_14px_34px_rgba(104,84,255,0.10)]">
+      <div className="flex items-center justify-between gap-3">
+        <span className="inline-flex items-center gap-2 rounded-full bg-white px-2.5 py-1 text-[11px] font-black text-brand">
+          <Icon name="refresh" className="h-3.5 w-3.5 animate-spin" />
+          生成中
+        </span>
+        <Icon name="sparkles" className="h-5 w-5 animate-pulse text-brand" />
+      </div>
+      <h3 className="mt-3 line-clamp-2 text-[15px] font-black leading-6 text-ink">{task.title}</h3>
+      <div className="mt-3 space-y-1.5">
+        {facts.map((fact) => (
+          <div key={fact} className="truncate text-[11.5px] font-bold text-slate-500">
+            {fact}
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white">
+        <div className="h-full w-2/3 animate-pulse rounded-full bg-brand" />
+      </div>
+    </div>
+  );
+}
+
+function ValidationTaskTile({ card }: { card: ValidationCard }) {
+  const evidenceTotal = card.actions.reduce((sum, action) => sum + (action.evidence_count || 0), 0);
+  const evidenceTarget = card.actions.reduce((sum, action) => sum + (action.evidence_target || 0), 0);
+  const doneCount = card.actions.filter((action) => action.status === "done").length;
+
+  return (
+    <a
+      href={`/validation-cards/${card.id}`}
+      className="rounded-2xl border border-line bg-white px-4 py-4 text-left transition hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-[0_16px_36px_rgba(30,58,138,0.10)]"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <span className={cn("rounded-lg px-2 py-1 text-[11px] font-black", validationStatusTone(card.status))}>
+          {validationStatusLabel(card.status)}
+        </span>
+        <span className="text-[11px] font-bold text-slate-400">{formatTime(card.updated_at)}</span>
+      </div>
+      <h3 className="mt-3 line-clamp-2 text-[15px] font-black leading-6 text-ink">{card.title}</h3>
+      <p className="mt-2 line-clamp-2 text-[11.5px] font-semibold leading-5 text-slate-400">{card.project_summary}</p>
+      <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+        {[
+          ["节点", `${doneCount}/${card.actions.length}`],
+          ["证据", `${evidenceTotal}/${evidenceTarget}`],
+          ["等级", String(card.meta?.evidence_grade || card.actions[0]?.evidence_grade || "C")],
+        ].map(([label, value]) => (
+          <div key={label} className="rounded-xl bg-slate-50 px-2 py-2">
+            <div className="text-[13px] font-black text-[#172452]">{value}</div>
+            <div className="mt-0.5 text-[10px] font-bold text-slate-400">{label}</div>
+          </div>
+        ))}
+      </div>
+    </a>
+  );
+}
+
+function validationStatusLabel(status: string): string {
+  return {
+    draft: "草稿",
+    running: "验证中",
+    completed: "已完成",
+    archived: "已归档",
+  }[status] || status;
+}
+
+function validationStatusTone(status: string): string {
+  if (status === "running") return "bg-emerald-50 text-emerald-600";
+  if (status === "completed") return "bg-brand/10 text-brand";
+  if (status === "archived") return "bg-slate-100 text-slate-500";
+  return "bg-[#f0edff] text-brand";
 }
 
 function formatTime(value: string): string {

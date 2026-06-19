@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class WorkbenchProject(BaseModel):
@@ -52,6 +52,13 @@ class WorkbenchAction(BaseModel):
     priority_score: int = 50
     kill_if_failed: bool = False
     evidence_items: list[dict] = Field(default_factory=list)
+
+    @field_validator("parent_id", mode="before")
+    @classmethod
+    def normalize_parent_id(cls, value):
+        if value is None or value == "":
+            return None
+        return str(value)
 
 
 class WorkbenchColdReview(BaseModel):
